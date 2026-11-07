@@ -472,5 +472,5 @@ Object.assign(HELP, more);
 Object.assign(HELP, HELP_MORE);
 
 export function helpOf(locale: LocaleId): HelpSection[] {
-  return HELP[locale] || HELP.en || HELP["zh-CN"];
+  return HELP[locale] || HELP.en || zhCN;
 }

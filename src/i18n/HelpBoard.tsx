@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { LangSelect, useI18n } from "./index";
+import { LangSelect, useI18n } from ".";
 
 export function HelpBoard({ q, onQ }: { q: string; onQ: (v: string) => void }) {
   const { t, help, locale } = useI18n();
