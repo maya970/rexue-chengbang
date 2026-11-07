@@ -149,9 +149,9 @@ export function WorldCanvas(props: {
         const elev = t === "sea" ? 0 : (grid[ly]?.[lx] ?? 0);
         const q = project(lx, ly, elev, ox, oy, zoom);
         const kind = kindOf(c);
-        drawIsoSprite(ctx, q.x, q.y, zoom * 1.15, overlaySprite(kind), TILE);
+        drawIsoSprite(ctx, q.x, q.y, zoom, overlaySprite(kind), TILE, 0.9);
         if (c.owner === address) {
-          drawIsoSprite(ctx, q.x + 6 * zoom, q.y - 4 * zoom, zoom, overlaySprite("flag"), 8);
+          drawIsoSprite(ctx, q.x + 3 * zoom, q.y, zoom * 0.85, overlaySprite("flag"), 8, 0.42);
         }
       }
 
@@ -163,7 +163,7 @@ export function WorldCanvas(props: {
         const t = terrainAt(Math.floor(pos.x), Math.floor(pos.y));
         const elev = t === "sea" ? 0 : (grid[Math.floor(ly)]?.[Math.floor(lx)] || 0);
         const q = project(lx, ly, elev, ox, oy, zoom);
-        drawIsoSprite(ctx, q.x, q.y - walk, zoom, overlaySprite("army", walk), TILE);
+        drawIsoSprite(ctx, q.x, q.y - walk, zoom, overlaySprite("army", walk), TILE, 0.9);
       }
 
       if (selected && selected.x >= origin.x && selected.y >= origin.y && selected.x < origin.x + CHART && selected.y < origin.y + CHART) {

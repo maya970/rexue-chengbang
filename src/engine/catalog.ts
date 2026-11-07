@@ -87,8 +87,8 @@ export const BUILDINGS: Record<
   range: { name: "弓营", blurb: "招募弓手。", max: 16, baseTime: 28, citizens: 1, recruit: 2, works: 2 },
   wall: { name: "城墙", blurb: "守城时略增地形宽度。", max: 16, baseTime: 30, citizens: 0, recruit: 0, works: 2 },
   temple: { name: "神庙", blurb: "铭记战争。每场战役都刻在墙上。", max: 12, baseTime: 34, citizens: 1, recruit: 0, works: 2 },
-  shipyard: { name: "造船厂", blurb: "建造舰只。必须沿海。", max: 16, baseTime: 40, citizens: 1, recruit: 2, works: 2, needCoast: true },
-  harbor: { name: "海港", blurb: "没有港口不能出海。必须沿海。", max: 12, baseTime: 32, citizens: 2, recruit: 0, works: 2, needCoast: true },
+  shipyard: { name: "造船厂", blurb: "建造舰只。海岸或海域城才能建。", max: 16, baseTime: 40, citizens: 1, recruit: 2, works: 2, needCoast: true },
+  harbor: { name: "海港", blurb: "没有港口不能出海。海岸或海域城才能建。", max: 12, baseTime: 32, citizens: 2, recruit: 0, works: 2, needCoast: true },
 };
 
 export const ROLES: Record<
@@ -108,7 +108,7 @@ export const ROLES: Record<
   peltast: { name: "轻盾兵", kind: "person", blurb: "行军略快，战斗只看战役履历。", time: 12, berth: 1, speed: 12, building: "barracks" },
   toxotes: { name: "弓手", kind: "person", blurb: "从弓营招募。", time: 14, berth: 1, speed: 10, building: "range" },
   hippeus: { name: "骑兵", kind: "person", blurb: "陆上最快。", time: 20, berth: 2, speed: 18, building: "stables" },
-  epibatai: { name: "海军陆战", kind: "person", blurb: "登陆与跳帮。", time: 18, berth: 1, speed: 9, building: "barracks", needCoast: true },
+  epibatai: { name: "海军陆战", kind: "person", blurb: "登陆与跳帮。兵营可训，出海再登船。", time: 18, berth: 1, speed: 9, building: "barracks" },
   trierarch: { name: "舰长", kind: "person", blurb: "战船护航需要舰长。", time: 22, berth: 1, speed: 9, building: "shipyard", needCoast: true },
   citizen: { name: "公民", kind: "person", blurb: "由奴隶转正。占招募名额，可监工、可上阵。", time: 14, berth: 1, speed: 8, building: "oikos" },
   slave: { name: "奴隶", kind: "slave", blurb: "不能招募。只能战斗抓获，或用本城物资卡买。可转公民、可上阵。", time: 10, berth: 1, speed: 7 },

@@ -110,6 +110,30 @@ export function drawFlatTop(
   textureIsoTop(ctx, x, y, scale, img);
 }
 
+const spriteFoot = new WeakMap<HTMLCanvasElement, number>();
+
+function opaqueFoot(img: HTMLCanvasElement) {
+  const hit = spriteFoot.get(img);
+  if (hit) return hit;
+  const g = img.getContext("2d");
+  if (!g) return 1;
+  const { width: w, height: h } = img;
+  const data = g.getImageData(0, 0, w, h).data;
+  let last = h;
+  for (let row = h - 1; row >= 0; row -= 1) {
+    for (let col = 0; col < w; col += 1) {
+      if (data[(row * w + col) * 4 + 3] > 12) {
+        last = row + 1;
+        row = -1;
+        break;
+      }
+    }
+  }
+  const frac = Math.max(0.35, last / h);
+  spriteFoot.set(img, frac);
+  return frac;
+}
+
 export function drawIsoSprite(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -117,10 +141,13 @@ export function drawIsoSprite(
   scale: number,
   img: CanvasImageSource,
   size = 16,
+  foot = 0.78,
 ) {
   ctx.imageSmoothingEnabled = false;
-  const s = size * scale * 0.95;
-  ctx.drawImage(img, x - s / 2, y + (TH * scale) * 0.22 - s, s, s);
+  const s = Math.min(TH * scale * 1.35, TW * scale * 0.62, size * scale);
+  const pad = img instanceof HTMLCanvasElement ? opaqueFoot(img) : 1;
+  const footY = y + TH * scale * foot;
+  ctx.drawImage(img, x - s / 2, footY - s * pad, s, s);
 }
 
 export function inBlock(px: number, py: number, x: number, y: number, scale: number, drop: number) {

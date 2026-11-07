@@ -1,4 +1,4 @@
-import { canFound, cityIdAt, hashXY, isCoast, terrainAt } from "./map";
+import { canFound, cityIdAt, hashXY, isWater, terrainAt } from "./map";
 import { seedCityPlots } from "./plots";
 import { buildMultAt, frontageAt } from "./site";
 import type { Guild, SystemRank, World } from "../types";
@@ -109,7 +109,7 @@ export function ensureSystemNear(world: World, x: number, y: number) {
             wall: { level: Math.min(10, Math.ceil(lv / 3)), wars: [] },
             barracks: { level: Math.min(8, Math.ceil(lv / 4)), wars: [] },
             agora: { level: Math.min(6, Math.ceil(lv / 5)), wars: [] },
-            harbor: isCoast(terrainAt(pos.x, pos.y)) ? { level: Math.min(6, Math.ceil(lv / 5)), wars: [] } : undefined,
+            harbor: isWater(terrainAt(pos.x, pos.y)) ? { level: Math.min(6, Math.ceil(lv / 5)), wars: [] } : undefined,
           },
           plots: [],
           foundedAt: 0,

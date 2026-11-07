@@ -67,7 +67,22 @@ export function useGame() {
     return () => clearInterval(t);
   }, [load]);
 
-  const folded = useMemo(() => foldHistory(batches, checkpoint, pairs), [batches, checkpoint, pairs]);
+  const foldInput = useMemo(() => {
+    if (!pending.length || !address) return batches;
+    return [
+      ...batches,
+      {
+        key: `pending:${address}`,
+        owner: address,
+        signer: address,
+        commands: pending,
+        clientTime: pending[0] ? Date.now() : 0,
+        status: "queued" as const,
+        proofs: {},
+      },
+    ];
+  }, [batches, pending, address]);
+  const folded = useMemo(() => foldHistory(foldInput, checkpoint, pairs), [foldInput, checkpoint, pairs]);
   const sim = useMemo(() => projectWorld(folded, now, view.x, view.y), [folded, now, view.x, view.y]);
   const world = useMemo(() => veilWorld(sim, address, focusCityId), [sim, address, focusCityId]);
   const myCities = address ? playerCities(sim, address) : [];

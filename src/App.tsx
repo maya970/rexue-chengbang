@@ -21,8 +21,21 @@ function remain(ms: number, now: number) {
   return m > 0 ? `${m}分${s % 60}秒` : `${s}秒`;
 }
 
-type Modal = "none" | "tile" | "city" | "recruit" | "squad" | "build" | "card" | "reports" | "market" | "guild";
+type Modal = "none" | "tile" | "city" | "recruit" | "squad" | "build" | "card" | "reports" | "market" | "guild" | "atlas";
 type RosterTab = "cities" | "people" | "slaves" | "goods" | "marches";
+type BoardCat = "all" | "win" | "lose" | "scout" | "colonize" | "fight" | "reinforce" | "mine" | "join" | "big" | "foot" | "bow" | "horse" | "navy" | "cheap";
+
+function hay(parts: (string | number | undefined)[]) {
+  return parts.filter((x) => x !== undefined).join(" ").toLowerCase();
+}
+
+function marketBucket(role?: string) {
+  if (role === "toxotes") return "bow";
+  if (role === "hippeus") return "horse";
+  if (role === "epibatai" || role === "trierarch") return "navy";
+  if (role === "hoplite" || role === "peltast" || role === "citizen") return "foot";
+  return "other";
+}
 
 export function App() {
   const g = useGame();
@@ -37,7 +50,6 @@ export function App() {
   const [cardId, setCardId] = useState<string>("");
   const [listAr, setListAr] = useState("0.1");
   const [rosterOpen, setRosterOpen] = useState(false);
-  const [atlasOpen, setAtlasOpen] = useState(false);
   const [cityPins, setCityPins] = useState<{ id: string; name: string; x: number; y: number }[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("rexue-chengbang-my-cities") || "[]") as { id: string; name: string; x: number; y: number }[];
@@ -60,6 +72,8 @@ export function App() {
   const [fromCityId, setFromCityId] = useState("");
   const [plotId, setPlotId] = useState("");
   const [guildName, setGuildName] = useState("新城邦同盟");
+  const [boardQ, setBoardQ] = useState("");
+  const [boardCat, setBoardCat] = useState<BoardCat>("all");
 
   const sim = g.sim;
   const city = g.activeCity;
@@ -132,8 +146,86 @@ export function App() {
       localStorage.setItem("rexue-chengbang-seen-reports", JSON.stringify(next));
     } catch { /* ignore */ }
     setToast(null);
+    setBoardQ("");
+    setBoardCat("all");
+    setRosterOpen(false);
     setModal("reports");
   }
+
+  function openBoard(kind: "market" | "guild" | "atlas") {
+    setBoardQ("");
+    setBoardCat("all");
+    setRosterOpen(false);
+    setModal(kind);
+  }
+
+  const boardModal = modal === "reports" || modal === "market" || modal === "guild" || modal === "atlas";
+
+  const filteredReports = useMemo(() => {
+    const q = boardQ.trim().toLowerCase();
+    return mineReports.filter((r) => {
+      if (boardCat === "win" && !r.win) return false;
+      if (boardCat === "lose" && r.win) return false;
+      if (boardCat === "scout" && !r.title.includes("侦察")) return false;
+      if (boardCat === "colonize" && r.aftermath !== "colonize" && !r.title.includes("殖民")) return false;
+      if (boardCat === "reinforce" && r.aftermath !== "reinforce" && !r.title.includes("增援")) return false;
+      if (boardCat === "fight" && r.aftermath !== "plunder" && r.aftermath !== "massacre" && r.aftermath !== "occupy" && r.aftermath !== "destroy" && !r.title.includes("攻") && !r.title.includes("野")) return false;
+      if (!q) return true;
+      return hay([r.title, r.x, r.y, r.aftermath, ...(r.rounds || []).flatMap((x) => [x.title, x.text]), ...(r.deadNames || [])]).includes(q);
+    });
+  }, [mineReports, boardQ, boardCat]);
+
+  const filteredListings = useMemo(() => {
+    const q = boardQ.trim().toLowerCase();
+    const rows = Object.values(sim.listings).map((listing) => ({ listing, card: sim.cards[listing.cardId] }));
+    const next = rows.filter(({ listing, card }) => {
+      if (boardCat === "mine" && listing.seller !== g.address) return false;
+      if (boardCat === "foot" || boardCat === "bow" || boardCat === "horse" || boardCat === "navy") {
+        if (marketBucket(card?.role) !== boardCat) return false;
+      }
+      if (!q) return true;
+      return hay([card?.name, card?.role, card?.role ? ROLES[card.role].name : "", listing.seller, winstonToAr(listing.winston)]).includes(q);
+    });
+    if (boardCat === "cheap") next.sort((a, b) => a.listing.winston - b.listing.winston);
+    return next;
+  }, [sim.listings, sim.cards, boardQ, boardCat, g.address]);
+
+  const filteredGuilds = useMemo(() => {
+    const q = boardQ.trim().toLowerCase();
+    return Object.values(sim.guilds || {}).filter((guild) => {
+      if (boardCat === "mine" && guild.id !== myGuildId) return false;
+      if (boardCat === "join" && (Boolean(myGuild) || guild.members.includes(g.address))) return false;
+      if (boardCat === "big" && guild.members.length < 5) return false;
+      if (!q) return true;
+      return hay([guild.name, guild.leader, ...guild.members, guild.members.length]).includes(q);
+    });
+  }, [sim.guilds, boardQ, boardCat, myGuildId, myGuild, g.address]);
+
+  const atlasHits = useMemo(() => {
+    const q = boardQ.trim();
+    const hits: { cx: number; cy: number; label: string }[] = [];
+    const seen = new Set<string>();
+    const add = (cx: number, cy: number, label: string) => {
+      const k = `${cx}:${cy}`;
+      if (seen.has(k)) return;
+      seen.add(k);
+      hits.push({ cx, cy, label });
+    };
+    const coord = q.match(/^(-?\d+)\s*[,，]\s*(-?\d+)$/);
+    if (coord) add(Number(coord[1]), Number(coord[2]), `${chartName(Number(coord[1]), Number(coord[2]))} (${coord[1]},${coord[2]})`);
+    for (const c of rosterCities) {
+      const ch = chartOf(c.x, c.y);
+      add(ch.cx, ch.cy, `${c.name} · ${chartName(ch.cx, ch.cy)}`);
+    }
+    const needle = q.toLowerCase();
+    for (let cy = g.chart.cy - 7; cy <= g.chart.cy + 7; cy += 1) {
+      for (let cx = g.chart.cx - 7; cx <= g.chart.cx + 7; cx += 1) {
+        const name = chartName(cx, cy);
+        if (!needle || name.toLowerCase().includes(needle) || `${cx},${cy}`.includes(needle)) add(cx, cy, `${name} (${cx},${cy})`);
+      }
+    }
+    return hits.slice(0, 40);
+  }, [boardQ, rosterCities, g.chart]);
   const busyBuild = Boolean(city && Object.values(city.buildings).some((b) => b?.job));
   const pendingBuild = g.pending.some((c) => c.kind === "upgrade" && c.cityId === city?.id);
 
@@ -162,7 +254,6 @@ export function App() {
     setInside(enter && Boolean(sim.cities[id]));
     setModal("none");
     setRosterOpen(false);
-    setAtlasOpen(false);
   }
 
   function jumpCard(id: string) {
@@ -204,12 +295,10 @@ export function App() {
           <button className="btn tiny" onClick={openReports}>
             战报{unreadReports.length ? ` ${unreadReports.length}` : ""}
           </button>
-          <button className="btn tiny" onClick={() => setModal("market")}>货架</button>
-          <button className="btn tiny" onClick={() => setModal("guild")}>公会</button>
-          <button className="btn tiny" onClick={() => { setAtlasOpen((v) => !v); setRosterOpen(false); }}>
-            {atlasOpen ? "收起超大地图" : "超大地图"}
-          </button>
-          <button className="btn tiny primary" onClick={() => { setRosterOpen((v) => !v); setAtlasOpen(false); }}>
+          <button className="btn tiny" onClick={() => openBoard("market")}>货架</button>
+          <button className="btn tiny" onClick={() => openBoard("guild")}>公会</button>
+          <button className="btn tiny" onClick={() => openBoard("atlas")}>超大地图</button>
+          <button className="btn tiny primary" onClick={() => setRosterOpen((v) => !v)}>
             {rosterOpen ? "收起名册" : "我的名册"}
           </button>
           {(g.myCities[0] || rosterCities[0]) && !inside ? (
@@ -227,6 +316,7 @@ export function App() {
         </nav>
         {g.busy ? <span className="busy">{g.busy}</span> : null}
         {g.error ? <span className="err">{g.error}</span> : null}
+        {sim.skipped.slice(-1).map((s) => <span className="err" key={s}>{s}</span>)}
         <div className="top-actions">
           <input ref={fileRef} type="file" accept="application/json" hidden onChange={async (e) => {
             const f = e.target.files?.[0];
@@ -282,21 +372,6 @@ export function App() {
         ) : null}
       </div>
 
-      {atlasOpen ? (
-        <aside className="map-menu atlas-menu">
-          <div className="map-menu-head">
-            <b>超大地图</b>
-            <span className="muted">俯视总览，点一块进入大地图</span>
-            <button className="btn tiny" style={{ marginLeft: "auto" }} onClick={() => setAtlasOpen(false)}>关闭</button>
-          </div>
-          <AtlasCanvas
-            chart={g.chart}
-            cities={rosterCities.map((c) => ({ x: c.x, y: c.y, mine: true }))}
-            onEnter={(cx, cy) => { g.enterChart(cx, cy); setInside(false); setAtlasOpen(false); }}
-          />
-        </aside>
-      ) : null}
-
       {rosterOpen ? (
           <aside className="map-menu">
             <div className="map-menu-head">
@@ -306,7 +381,7 @@ export function App() {
             </div>
             <div className="map-menu-tabs">
               {([
-                ["cities", `城邦 ${g.myCities.length}`],
+                ["cities", `城邦 ${rosterCities.length}`],
                 ["people", `人物 ${myCards.filter((c) => c.kind === "person").length}`],
                 ["slaves", `奴隶 ${myCards.filter((c) => c.kind === "slave").length}`],
                 ["goods", `物资 ${myCards.filter((c) => c.kind === "supply").length}`],
@@ -388,7 +463,7 @@ export function App() {
 
       {modal !== "none" ? (
         <div className="modal-back" onClick={() => setModal("none")}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className={boardModal ? "modal board" : "modal"} onClick={(e) => e.stopPropagation()}>
             <button className="btn tiny modal-x" onClick={() => setModal("none")}>关闭</button>
             {modal === "tile" && sel ? (
               <>
@@ -406,8 +481,12 @@ export function App() {
                 ) : (
                   <p>
                     {g.myCities.length
-                      ? `第二座城必须与已打下来的格子连通。出征「开辟殖民市」：人物卡 ${COLONIZE_COST.persons}，消耗奴隶 ${COLONIZE_COST.slaves}、物资 ${COLONIZE_COST.supplies}。侦察邻格可占领空地。公会共享连通。`
-                      : "第一座城不限位置。"}
+                      ? `第二座城必须与已打下来的格子连通。出征「开辟殖民市」：人物卡 ${COLONIZE_COST.persons}，消耗奴隶 ${COLONIZE_COST.slaves}、物资 ${COLONIZE_COST.supplies}。侦察邻格可占领空地。公会共享连通。海域、山地都可以殖民。`
+                      : terrainAt(sel.x, sel.y) === "sea"
+                        ? "第一座城可以建在海域，建成海港城，自带港口、船厂和运输船。"
+                        : terrainAt(sel.x, sel.y) === "mountain"
+                          ? "第一座城可以建在山地。山城易守，没有港口，翻山行军更慢。"
+                          : "第一座城：平原、森林、海岸、山地、海域都可以建。"}
                   </p>
                 )}
                 {g.address && sel ? (
@@ -424,6 +503,14 @@ export function App() {
                     <input value={cityName} onChange={(e) => setCityName(e.target.value)} />
                     <button className="btn primary" onClick={() => {
                       g.addCommand(makeCommand({ kind: "found_city", label: `建城 ${cityName} (${sel.x},${sel.y})`, x: sel.x, y: sel.y, name: cityName }));
+                      const pin = { id: cityIdAt(sel.x, sel.y), name: cityName, x: sel.x, y: sel.y };
+                      setCityPins((prev) => {
+                        const next = [...prev.filter((p) => p.id !== pin.id), pin];
+                        try {
+                          localStorage.setItem("rexue-chengbang-my-cities", JSON.stringify(next));
+                        } catch { /* ignore */ }
+                        return next;
+                      });
                       setModal("none");
                     }}>加入建城指令</button>
                   </>
@@ -624,97 +711,150 @@ export function App() {
             {modal === "market" ? (
               <>
                 <h3>人物卡货架</h3>
-                <p className="muted">上架不收费。成交时付 AR：九成给卖家，一成打入手续费地址。付款上链后即使卖家再撤架也会过户。</p>
-                {Object.values(sim.listings).map((listing) => {
-                  const card = sim.cards[listing.cardId];
-                  return (
-                    <div className="card" key={listing.id}>
-                      <div>
-                        {card?.name || listing.cardId}
-                        <small>{winstonToAr(listing.winston)} AR · {shortAddr(listing.seller)}</small>
+                <p className="muted">上架免费。成交九成给卖家，一成手续费。可按兵种分类、按名字或卖家检索。</p>
+                <input className="board-search" value={boardQ} onChange={(e) => setBoardQ(e.target.value)} placeholder="搜索卡名、兵种、卖家、价格…" />
+                <div className="board-cats">
+                  {([["all", "全部"], ["mine", "我的"], ["foot", "步兵"], ["bow", "弓手"], ["horse", "骑兵"], ["navy", "海军"], ["cheap", "低价"]] as [BoardCat, string][]).map(([id, label]) => (
+                    <button key={id} className={`btn tiny${boardCat === id ? " primary" : ""}`} onClick={() => setBoardCat(id)}>{label}</button>
+                  ))}
+                </div>
+                <div className="board-body">
+                  <div className="board-grid">
+                    {filteredListings.length ? filteredListings.map(({ listing, card }) => (
+                      <div className="card" key={listing.id}>
+                        <div>
+                          {card?.name || listing.cardId}
+                          <small>{card?.role ? ROLES[card.role].name : "人物"} · {winstonToAr(listing.winston)} AR · {shortAddr(listing.seller)}</small>
+                        </div>
+                        {listing.seller === g.address ? (
+                          <button className="btn tiny" onClick={() => {
+                            g.addCommand(makeCommand({ kind: "delist_card", label: `撤架 ${card?.name || ""}`, listingId: listing.id }));
+                          }}>撤架</button>
+                        ) : (
+                          <button className="btn tiny" onClick={async () => {
+                            if (!city || !g.address) {
+                              g.setError("先有一座自己的城才能买卡");
+                              return;
+                            }
+                            try {
+                              g.setError("");
+                              const paid = await g.payForCard(listing.seller, listing.winston, listing.cardId, listing.id, city.id);
+                              g.addCommand(makeCommand({
+                                kind: "buy_card",
+                                label: `买卡 ${card?.name || ""}`,
+                                listingId: listing.id,
+                                cityId: city.id,
+                                cardId: listing.cardId,
+                                payTx: paid.payTx,
+                                burnTx: paid.burnTx,
+                                feeTx: paid.burnTx,
+                                priceWinston: listing.winston,
+                              }));
+                              setModal("none");
+                            } catch (e) {
+                              g.setError(e instanceof Error ? e.message : String(e));
+                            }
+                          }}>用 AR 购买</button>
+                        )}
                       </div>
-                      {listing.seller === g.address ? (
-                        <button className="btn tiny" onClick={() => {
-                          g.addCommand(makeCommand({ kind: "delist_card", label: `撤架 ${card?.name || ""}`, listingId: listing.id }));
-                        }}>撤架</button>
-                      ) : (
-                        <button className="btn tiny" onClick={async () => {
-                          if (!city || !g.address) return;
-                          try {
-                            g.setError("");
-                            const paid = await g.payForCard(listing.seller, listing.winston, listing.cardId, listing.id, city.id);
-                            g.addCommand(makeCommand({
-                              kind: "buy_card",
-                              label: `买卡 ${card?.name || ""}`,
-                              listingId: listing.id,
-                              cityId: city.id,
-                              cardId: listing.cardId,
-                              payTx: paid.payTx,
-                              burnTx: paid.burnTx,
-                              feeTx: paid.burnTx,
-                              priceWinston: listing.winston,
-                            }));
-                            setModal("none");
-                          } catch (e) {
-                            g.setError(e instanceof Error ? e.message : String(e));
-                          }
-                        }}>用 AR 购买</button>
-                      )}
-                    </div>
-                  );
-                })}
+                    )) : <p className="muted">没有符合检索的货架。</p>}
+                  </div>
+                </div>
               </>
             ) : null}
 
             {modal === "guild" ? (
               <>
                 <h3>公会</h3>
-                <p className="muted">公会共享已打下来的连通格子。退出后一个月内不能加入其他公会。</p>
-                {myGuild ? (
-                  <>
-                    <p>{myGuild.name}<small>会长 {shortAddr(myGuild.leader)} · {myGuild.members.length} 人</small></p>
-                    <button className="btn" onClick={() => {
-                      g.addCommand(makeCommand({ kind: "leave_guild", label: `退出公会 ${myGuild.name}` }));
-                      setModal("none");
-                    }}>退出公会</button>
-                  </>
-                ) : (
-                  <>
-                    {g.address && (sim.guildBanUntil?.[g.address] || 0) > g.now ? (
-                      <p className="err">禁入期至 {new Date(sim.guildBanUntil[g.address]).toLocaleString()}</p>
-                    ) : null}
-                    <input value={guildName} onChange={(e) => setGuildName(e.target.value)} />
-                    <button className="btn primary" onClick={() => {
-                      g.addCommand(makeCommand({ kind: "create_guild", label: `建立公会 ${guildName}`, name: guildName }));
-                      setModal("none");
-                    }}>建立公会</button>
-                    {Object.values(sim.guilds || {}).map((guild) => (
+                <p className="muted">共享连通格子。退出后一个月不能加入其他公会。可按名称、会长检索。</p>
+                <input className="board-search" value={boardQ} onChange={(e) => setBoardQ(e.target.value)} placeholder="搜索公会名、会长地址、人数…" />
+                <div className="board-cats">
+                  {([["all", "全部"], ["mine", "我的"], ["join", "可加入"], ["big", "大公会"]] as [BoardCat, string][]).map(([id, label]) => (
+                    <button key={id} className={`btn tiny${boardCat === id ? " primary" : ""}`} onClick={() => setBoardCat(id)}>{label}</button>
+                  ))}
+                </div>
+                <div className="board-body">
+                  {myGuild ? (
+                    <div className="card">
+                      <div>{myGuild.name}<small>会长 {shortAddr(myGuild.leader)} · {myGuild.members.length} 人</small></div>
+                      <button className="btn tiny" onClick={() => {
+                        g.addCommand(makeCommand({ kind: "leave_guild", label: `退出公会 ${myGuild.name}` }));
+                        setModal("none");
+                      }}>退出公会</button>
+                    </div>
+                  ) : (
+                    <div className="row">
+                      {g.address && (sim.guildBanUntil?.[g.address] || 0) > g.now ? (
+                        <p className="err">禁入期至 {new Date(sim.guildBanUntil[g.address]).toLocaleString()}</p>
+                      ) : null}
+                      <input value={guildName} onChange={(e) => setGuildName(e.target.value)} placeholder="新公会名" />
+                      <button className="btn primary" onClick={() => {
+                        g.addCommand(makeCommand({ kind: "create_guild", label: `建立公会 ${guildName}`, name: guildName }));
+                        setModal("none");
+                      }}>建立公会</button>
+                    </div>
+                  )}
+                  <div className="board-grid" style={{ marginTop: 10 }}>
+                    {filteredGuilds.length ? filteredGuilds.map((guild) => (
                       <div className="card" key={guild.id}>
-                        <div>{guild.name}<small>{guild.members.length} 人 · {shortAddr(guild.leader)}</small></div>
-                        <button className="btn tiny" onClick={() => {
-                          g.addCommand(makeCommand({ kind: "join_guild", label: `加入 ${guild.name}`, guildId: guild.id }));
-                          setModal("none");
-                        }}>加入</button>
+                        <div>{guild.name}<small>{guild.members.length} 人 · 会长 {shortAddr(guild.leader)}</small></div>
+                        {guild.id === myGuildId ? <span className="muted">已加入</span> : (
+                          <button className="btn tiny" onClick={() => {
+                            g.addCommand(makeCommand({ kind: "join_guild", label: `加入 ${guild.name}`, guildId: guild.id }));
+                            setModal("none");
+                          }}>加入</button>
+                        )}
                       </div>
-                    ))}
-                  </>
-                )}
+                    )) : <p className="muted">没有符合检索的公会。</p>}
+                  </div>
+                </div>
               </>
             ) : null}
 
             {modal === "reports" ? (
               <>
                 <h3>军团回报</h3>
-                <p className="muted">派出的人到达后会写进这里：胜负、阵亡、奴隶、物资、殖民成败。</p>
-                {mineReports.length ? mineReports.slice(0, 20).map((r) => (
-                  <article key={r.id} className="report">
-                    <h4>{r.win ? "成" : "败"} · {r.title} ({r.x},{r.y})</h4>
-                    <p className="muted">{new Date(r.time).toLocaleString()}{r.aftermath ? ` · ${MISSION_NAME[r.aftermath]}` : ""}</p>
-                    {(r.rounds || []).map((round, i) => <p key={i}><b>{round.title}</b> {round.text}</p>)}
-                    {r.slaves || r.supplies ? <p>缴获奴隶 {r.slaves || 0} · 物资 {r.supplies || 0}</p> : null}
-                    {r.deadNames?.length ? <p className="err">阵亡：{r.deadNames.join("、")}</p> : null}
-                  </article>
-                )) : <p className="muted">还没有你的军团回报。</p>}
+                <p className="muted">派出的人到达后写在这里。可按胜负、任务检索。</p>
+                <input className="board-search" value={boardQ} onChange={(e) => setBoardQ(e.target.value)} placeholder="搜索标题、坐标、阵亡、经过…" />
+                <div className="board-cats">
+                  {([["all", "全部"], ["win", "胜利"], ["lose", "失败"], ["fight", "交战"], ["scout", "侦察"], ["colonize", "殖民"], ["reinforce", "增援"]] as [BoardCat, string][]).map(([id, label]) => (
+                    <button key={id} className={`btn tiny${boardCat === id ? " primary" : ""}`} onClick={() => setBoardCat(id)}>{label}</button>
+                  ))}
+                </div>
+                <div className="board-body">
+                  {filteredReports.length ? filteredReports.map((r) => (
+                    <article key={r.id} className="report">
+                      <h4>{r.win ? "成" : "败"} · {r.title} ({r.x},{r.y})</h4>
+                      <p className="muted">{new Date(r.time).toLocaleString()}{r.aftermath ? ` · ${MISSION_NAME[r.aftermath]}` : ""}</p>
+                      {(r.rounds || []).map((round, i) => <p key={i}><b>{round.title}</b> {round.text}</p>)}
+                      {r.slaves || r.supplies ? <p>缴获奴隶 {r.slaves || 0} · 物资 {r.supplies || 0}</p> : null}
+                      {r.deadNames?.length ? <p className="err">阵亡：{r.deadNames.join("、")}</p> : null}
+                    </article>
+                  )) : <p className="muted">{mineReports.length ? "没有符合检索的回报。" : "还没有你的军团回报。"}</p>}
+                </div>
+              </>
+            ) : null}
+
+            {modal === "atlas" ? (
+              <>
+                <h3>超大地图</h3>
+                <p className="muted">俯视总览。搜海图名、坐标如 0,0，或你的城邦名。</p>
+                <input className="board-search" value={boardQ} onChange={(e) => setBoardQ(e.target.value)} placeholder="搜索海图名、坐标、城邦…" />
+                <div className="board-atlas">
+                  <div className="board-atlas-list">
+                    {atlasHits.map((hit) => (
+                      <button key={`${hit.cx}:${hit.cy}:${hit.label}`} className={`btn tiny${hit.cx === g.chart.cx && hit.cy === g.chart.cy ? " primary" : ""}`} onClick={() => {
+                        g.enterChart(hit.cx, hit.cy);
+                        setInside(false);
+                      }}>{hit.label}</button>
+                    ))}
+                  </div>
+                  <AtlasCanvas
+                    chart={g.chart}
+                    cities={rosterCities.map((c) => ({ x: c.x, y: c.y, mine: true }))}
+                    onEnter={(cx, cy) => { g.enterChart(cx, cy); setInside(false); setModal("none"); }}
+                  />
+                </div>
               </>
             ) : null}
           </div>

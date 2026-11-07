@@ -114,9 +114,11 @@ export function CityCanvas(props: {
           }
           if (plot?.building) {
             const roof = ROOF[plot.building];
-            const q = project(lx, ly, elev + 1, ox, oy, zoom);
-            if (!water) drawBlock(ctx, q.x, q.y, zoom, 1, roof.top, roof.left, roof.right);
-            drawIsoSprite(ctx, p.x, p.y, zoom * 1.05, buildingTile(plot.building), 16);
+            if (!water) {
+              const q = project(lx, ly, elev + 1, ox, oy, zoom);
+              drawBlock(ctx, q.x, q.y, zoom, 1, roof.top, roof.left, roof.right);
+            }
+            drawIsoSprite(ctx, p.x, p.y, zoom, buildingTile(plot.building), 16, 0.9);
           }
         }
       }

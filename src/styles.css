@@ -109,6 +109,21 @@ aside.map-menu.atlas-menu .atlas-label { display: none; }
   width: min(520px, 92vw); max-height: 78vh; overflow: auto;
   background: #16110d; border: 1px solid var(--bronze); padding: 18px 18px 16px; position: relative;
 }
+.modal.board {
+  width: min(980px, 96vw); height: min(88vh, 940px); max-height: 88vh;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.modal.board h3 { margin-right: 72px; }
+.board-search {
+  width: 100%; background: #1c1612; color: var(--parchment);
+  border: 1px solid var(--line); padding: 8px 10px; margin: 6px 0 4px;
+}
+.board-cats { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+.board-body { flex: 1; min-height: 0; overflow: auto; }
+.board-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
+.board-atlas { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(180px, 240px) 1fr; gap: 10px; }
+.board-atlas-list { overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.board-atlas .atlas-wrap { min-height: 280px; height: 100%; border: 1px solid var(--line); }
 .modal-x { position: absolute; right: 10px; top: 10px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 

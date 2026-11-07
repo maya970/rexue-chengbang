@@ -31,8 +31,8 @@ function heur(ax: number, ay: number, bx: number, by: number): number {
 }
 
 function passable(t: Terrain, naval: boolean, allowLand: boolean, allowSea: boolean): boolean {
-  if (t === "mountain") return false;
   if (isSea(t)) return allowSea;
+  if (t === "mountain") return allowLand;
   if (walkableLand(t)) return allowLand || (naval && t === "coast");
   return false;
 }
@@ -66,7 +66,9 @@ function astar(
       const ny = cur.y + dy;
       const nk = key(nx, ny);
       if (!passable(terrainAt(nx, ny), naval, allowLand, allowSea) && nk !== goal) continue;
-      const step = dx !== 0 && dy !== 0 ? 1.41 : 1;
+      const ground = terrainAt(nx, ny);
+      let step = dx !== 0 && dy !== 0 ? 1.41 : 1;
+      if (ground === "mountain") step *= 2.15;
       const ng = (gScore.get(ck) || 0) + step;
       const prev = gScore.get(nk);
       if (prev === undefined || ng < prev) {

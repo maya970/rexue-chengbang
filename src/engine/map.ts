@@ -96,7 +96,7 @@ export function terrainAt(x: number, y: number): Terrain {
 }
 
 export function walkableLand(t: Terrain): boolean {
-  return t === "plain" || t === "forest" || t === "coast";
+  return t === "plain" || t === "forest" || t === "coast" || t === "mountain";
 }
 
 export function isSea(t: Terrain): boolean {
@@ -107,8 +107,13 @@ export function isCoast(t: Terrain): boolean {
   return t === "coast";
 }
 
+/** 海岸或海域：能停船、建港。 */
+export function isWater(t: Terrain): boolean {
+  return t === "sea" || t === "coast";
+}
+
 export function canFound(t: Terrain): boolean {
-  return t === "plain" || t === "coast" || t === "forest";
+  return t === "plain" || t === "coast" || t === "forest" || t === "mountain" || t === "sea";
 }
 
 export function tileName(t: Terrain): string {
@@ -142,7 +147,7 @@ export function npcAt(x: number, y: number): NpcSite | null {
   if (t === "sea" && r > 0.972) {
     return { x, y, name: `海盗船队·${level}级`, kind: "pirates", level };
   }
-  if (!canFound(t)) return null;
+  if (t === "sea") return null;
   if (r > 0.984) {
     const i = hashXY(x, y, 77) % POLIS_NAMES.length;
     return { x, y, name: `${POLIS_NAMES[i]}·${level}级`, kind: "polis", level };

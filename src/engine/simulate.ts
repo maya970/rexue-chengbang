@@ -2,7 +2,7 @@ import { berthOf, byIds, mintCard, slowest, uniqueId } from "./cards";
 import { AR_FEE_ADDR, BUILDINGS, COLONIZE_COST, MISSION_NAME, ROLES, scaleTime, splitWinston, SUPPLY_PER_SLAVE } from "./catalog";
 import { citizensOf, garrisonPeople, garrisonShips, recruitCapOf, recruitableCount, worksOf } from "./citymath";
 import { resolveFight } from "./combat";
-import { canFound, chartOf, CHART, cityIdAt, isCoast, npcAt, npcPower, respawnMs, terrainAt } from "./map";
+import { canFound, chartOf, CHART, cityIdAt, isWater, npcAt, npcPower, respawnMs, terrainAt } from "./map";
 import { marchSeconds, planPath, posAt, timeAtIndex } from "./path";
 import { ensureCityPlots, findPlotFor, occupyPlot, plotTimeMult, seedCityPlots } from "./plots";
 import {
@@ -118,7 +118,7 @@ function makeNpcCity(world: World, x: number, y: number, garrison = false) {
         oikos: { level: Math.min(6, 1 + Math.floor(site.level / 4)), wars: [] },
         wall: { level: site.kind === "polis" ? 3 : Math.max(1, Math.floor(site.level / 5)), wars: [] },
         barracks: { level: 1, wars: [] },
-        harbor: isCoast(terrainAt(x, y)) ? { level: 1, wars: [] } : undefined,
+        harbor: isWater(terrainAt(x, y)) || site.kind === "pirates" ? { level: 1, wars: [] } : undefined,
         shipyard: site.kind === "pirates" ? { level: 2, wars: [] } : undefined,
       },
     foundedAt: 0,
@@ -526,7 +526,11 @@ function resolveArrival(world: World, march: March, t: number) {
       name: `殖民市 ${march.toX},${march.toY}`,
       x: march.toX,
       y: march.toY,
-      buildings: { acropolis: { level: 1, wars: [] }, oikos: { level: 1, wars: [] } },
+      buildings: {
+        acropolis: { level: 1, wars: [] },
+        oikos: { level: 1, wars: [] },
+        ...(isWater(terrainAt(march.toX, march.toY)) ? { harbor: { level: 1, wars: [] } } : {}),
+      },
       plots: [],
       foundedAt: t,
       npc: false,
@@ -535,7 +539,7 @@ function resolveArrival(world: World, march: March, t: number) {
       wars: [],
     };
     world.cities[city.id] = city;
-    seedCityPlots(city, ["acropolis", "oikos"]);
+    seedCityPlots(city, isWater(terrainAt(march.toX, march.toY)) ? ["acropolis", "oikos", "harbor"] : ["acropolis", "oikos"]);
     claimTile(world, march.owner, city.x, city.y);
     parkAt(world, still, city);
     world.reports.unshift({
@@ -785,14 +789,24 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     const tera = terrainAt(x, y);
     if (!canFound(tera)) return skip(world, cmd, "地形不可建城");
     if ((world.gone[cityIdAt(x, y)]?.respawnAt || 0) > t) return skip(world, cmd, "废墟尚未散尽");
-    if (cityAt(world, x, y)) return skip(world, cmd, "此地已有城邦");
+    const existing = cityAt(world, x, y);
+    if (existing?.systemRank) return skip(world, cmd, "系统城不能直接建城，请用占领");
+    if (existing && !existing.npc) {
+      return skip(world, cmd, existing.owner === owner ? "这里已是你的城" : "此地已有城邦");
+    }
+    if (existing?.npc) {
+      for (const card of Object.values(world.cards)) {
+        if (card.cityId === existing.id) delete world.cards[card.id];
+      }
+      delete world.cities[existing.id];
+    }
     const owned = Object.values(world.cities).filter((c) => c.owner === owner && !c.npc);
     if (owned.length > 0) return skip(world, cmd, "首座城邦已建立，其余请用殖民指令");
-    const coast = isCoast(tera);
+    const water = isWater(tera);
     const city: City = {
       id: cityIdAt(x, y),
       owner,
-      name: cmd.name || "新城邦",
+      name: cmd.name || (tera === "sea" ? "海港城" : tera === "mountain" ? "山城" : "新城邦"),
       x,
       y,
       buildings: {
@@ -800,6 +814,7 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
         oikos: { level: 1, wars: [] },
         agora: { level: 1, wars: [] },
         barracks: { level: 1, wars: [] },
+        ...(water ? { harbor: { level: 1, wars: [] }, shipyard: { level: 1, wars: [] } } : {}),
       },
       plots: [],
       foundedAt: t,
@@ -809,7 +824,9 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
       wars: [],
     };
     world.cities[city.id] = city;
-    seedCityPlots(city, ["acropolis", "oikos", "agora", "barracks"]);
+    seedCityPlots(city, water
+      ? ["acropolis", "oikos", "agora", "barracks", "harbor", "shipyard"]
+      : ["acropolis", "oikos", "agora", "barracks"]);
     claimTile(world, owner, city.x, city.y);
     (["hoplite", "peltast"] as RoleId[]).forEach((role, i) => {
       const card = mintCard({
@@ -823,7 +840,7 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
       world.cards[card.id] = card;
     });
     mintSupply(world, 8, owner, city.id, t, `${entropy}:found`);
-    if (coast) {
+    if (water) {
       const ship = mintCard({
         id: uniqueId([batchKey, cmd.id, "transport"]),
         role: "transport",
@@ -834,7 +851,6 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
       });
       world.cards[ship.id] = ship;
     }
-    ensureNpcsNear(world, x, y);
     return;
   }
 
@@ -845,7 +861,7 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     const bid = cmd.building!;
     const def = BUILDINGS[bid];
     ensureCityPlots(city);
-    if (def.needCoast && !isCoast(terrainAt(city.x, city.y))) return skip(world, cmd, "必须沿海");
+    if (def.needCoast && !isWater(terrainAt(city.x, city.y))) return skip(world, cmd, "港口与船厂要建在海岸或海域城");
     const cur = city.buildings[bid] || { level: 0, wars: [] };
     if (Object.values(city.buildings).some((b) => b?.job)) return skip(world, cmd, "本城已有一座建筑在建，不能再排队");
     const plot = findPlotFor(city, bid, cmd.plotId);
@@ -879,7 +895,7 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     if (role === "slave" || role === "supply") return skip(world, cmd, "奴隶不能招募，物资不能招募");
     if (role === "citizen") return skip(world, cmd, "公民只能由本城奴隶转正");
     if (def.building && (city.buildings[def.building]?.level || 0) < 1) return skip(world, cmd, `需要 ${BUILDINGS[def.building].name}`);
-    if (def.needCoast && !isCoast(terrainAt(city.x, city.y))) return skip(world, cmd, "必须沿海");
+    if (def.needCoast && !isWater(terrainAt(city.x, city.y))) return skip(world, cmd, "舰只与舰长要在海岸或海域城招募");
     if (def.kind !== "ship" && recruitableCount(world, city.id) >= recruitCapOf(city)) {
       return skip(world, cmd, "招募上限已满，上限只由建筑物决定");
     }
@@ -966,8 +982,9 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     if (path.naval) {
       if ((city.buildings.harbor?.level || 0) < 1) return skip(world, cmd, "出海必须有港口");
       if (!ships.some((s) => s.role === "transport")) return skip(world, cmd, "过海必须有运输船");
-      if (cmd.mission !== "scout" && !ships.some((s) => s.role === "trireme")) return skip(world, cmd, "远征出海需要三列桨座护航");
-      if (cmd.mission !== "scout" && !people.some((p) => p.role === "trierarch")) return skip(world, cmd, "护航需要舰长");
+      const warFleet = cmd.mission !== "scout" && cmd.mission !== "reinforce";
+      if (warFleet && !ships.some((s) => s.role === "trireme")) return skip(world, cmd, "作战出海需要三列桨座护航");
+      if (warFleet && !people.some((p) => p.role === "trierarch")) return skip(world, cmd, "作战出海需要舰长");
       const cap = berthOf(ships);
       const weight = people.reduce((n, p) => n + p.berth, 0);
       if (weight > cap) return skip(world, cmd, `载重不足：泊位 ${cap} / 名册 ${weight}`);
@@ -1173,7 +1190,6 @@ export function foldHistory(batches: TrackedBatch[], checkpoint?: WorldCheckpoin
     for (const cmd of ev.commands) applyCommand(world, cmd, ev.owner, ev.time, ev.key, entropy, ev.proofs);
     acc = `${acc}:${entropy}`;
   }
-  seedTribesAroundPlayers(world);
   const last = events.at(-1)?.time || checkpoint?.lastTime || 0;
   if (last) tickWorld(world, last);
   world.digest = u32(acc).toString(16);
