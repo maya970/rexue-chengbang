@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { BUILDINGS, MISSION_NAME, ROLES, scaleTime, SUPPLY_PER_SLAVE } from "./engine/catalog";
+import { BUILDINGS, COLONIZE_COST, MISSION_NAME, ROLES, scaleTime, SUPPLY_PER_SLAVE } from "./engine/catalog";
 import { cityIdAt, npcAt, terrainAt, tileName } from "./engine/map";
 import { planPath } from "./engine/path";
 import { empireTimeFactor, slaveCostFor, workersFor } from "./engine/site";
@@ -19,6 +19,7 @@ function remain(ms: number, now: number) {
 }
 
 type Modal = "none" | "tile" | "city" | "recruit" | "squad" | "build" | "card" | "reports" | "market";
+type RosterTab = "cities" | "people" | "slaves" | "goods" | "marches";
 
 export function App() {
   const g = useGame();
@@ -32,6 +33,8 @@ export function App() {
   const [buildId, setBuildId] = useState<BuildingId>("oikos");
   const [cardId, setCardId] = useState<string>("");
   const [listAr, setListAr] = useState("0.1");
+  const [rosterOpen, setRosterOpen] = useState(false);
+  const [rosterTab, setRosterTab] = useState<RosterTab>("cities");
 
   const sim = g.sim;
   const city = g.activeCity;
@@ -70,6 +73,42 @@ export function App() {
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
   }
 
+  const myCards = useMemo(
+    () => Object.values(sim.cards).filter((c) => c.owner === g.address),
+    [sim.cards, g.address],
+  );
+  const myMarches = useMemo(
+    () => Object.values(sim.marches).filter((m) => m.owner === g.address),
+    [sim.marches, g.address],
+  );
+  const cityNameOf = (id: string) => sim.cities[id]?.name || "途中";
+
+  function jumpCity(id: string, enter = false) {
+    const c = sim.cities[id];
+    if (!c || c.owner !== g.address) return;
+    g.setFocusCityId(c.id);
+    g.setView({ x: c.x, y: c.y });
+    g.setSelected({ x: c.x, y: c.y });
+    setInside(enter);
+    setModal("none");
+    setRosterOpen(false);
+  }
+
+  function jumpCard(id: string) {
+    const card = sim.cards[id];
+    if (!card || card.owner !== g.address) return;
+    const home = sim.cities[card.cityId];
+    if (home && home.owner === g.address) {
+      g.setFocusCityId(home.id);
+      g.setView({ x: home.x, y: home.y });
+      g.setSelected({ x: home.x, y: home.y });
+    }
+    setCardId(card.id);
+    setInside(false);
+    setModal("card");
+    setRosterOpen(false);
+  }
+
   function enterOwnCity(id: string) {
     const c = sim.cities[id];
     if (!c || c.owner !== g.address) {
@@ -87,14 +126,8 @@ export function App() {
       <header className="top">
         <div className="brand cinzel">
           <b>热血城邦</b>
-          <span>完全免费 · 本地无需钱包 · 操作都在游戏里</span>
+          <span>完全免费 · 游戏内钱包 · 操作都在游戏里</span>
         </div>
-        <label className="muted">
-          <input type="radio" checked={g.mode === "local"} onChange={() => g.setMode("local")} /> 本地
-        </label>
-        <label className="muted">
-          <input type="radio" checked={g.mode === "permabin"} onChange={() => g.setMode("permabin")} /> Permabin
-        </label>
         {g.busy ? <span className="busy">{g.busy}</span> : null}
         {g.error ? <span className="err">{g.error}</span> : null}
         <div className="top-actions">
@@ -103,9 +136,7 @@ export function App() {
             if (f) g.doImport(await f.text());
             e.target.value = "";
           }} />
-          {g.mode === "local" ? (
-            <span className="muted">{shortAddr(g.address)} · 本城 人{peopleN} 奴{slaveN} 物资{goods.length} 城{g.myCities.length} · 免费无需钱包</span>
-          ) : g.address && !g.address.startsWith("local:") ? (
+          {g.address ? (
             <>
               <span className="muted">{shortAddr(g.address)} · 本城 人{peopleN} 奴{slaveN} 物资{goods.length} 城{g.myCities.length}</span>
               <button className="btn" onClick={g.doExport}>导出钱包</button>
@@ -145,11 +176,96 @@ export function App() {
         <div className="hud-float">
           <button className="btn tiny" onClick={() => setModal("reports")}>战报</button>
           <button className="btn tiny" onClick={() => setModal("market")}>货架</button>
+          {!inside ? (
+            <button className="btn tiny primary" onClick={() => setRosterOpen((v) => !v)}>
+              {rosterOpen ? "收起名册" : "我的名册"}
+            </button>
+          ) : null}
+          {g.myCities[0] && !inside ? (
+            <button className="btn tiny" onClick={() => jumpCity(g.myCities[0].id)}>一键回城</button>
+          ) : null}
           {mine ? <button className="btn tiny" onClick={() => { setInside(true); setModal("none"); }}>进入城市</button> : null}
           {inside ? <button className="btn tiny" onClick={() => setInside(false)}>回到大地图</button> : null}
           {inside && mine ? <button className="btn tiny" onClick={() => setModal("city")}>城内操作</button> : null}
           {incoming.length ? <span className="err">敌军逼近 {incoming.length} 支</span> : null}
         </div>
+
+        {rosterOpen && !inside ? (
+          <aside className="map-menu">
+            <div className="map-menu-head">
+              <b>我的名册</b>
+              <span className="muted">点一项才跳转，不铺在地图上</span>
+              <button className="btn tiny" style={{ marginLeft: "auto" }} onClick={() => setRosterOpen(false)}>关闭</button>
+            </div>
+            <div className="map-menu-tabs">
+              {([
+                ["cities", `城邦 ${g.myCities.length}`],
+                ["people", `人物 ${myCards.filter((c) => c.kind === "person").length}`],
+                ["slaves", `奴隶 ${myCards.filter((c) => c.kind === "slave").length}`],
+                ["goods", `物资 ${myCards.filter((c) => c.kind === "supply").length}`],
+                ["marches", `行军 ${myMarches.length}`],
+              ] as [RosterTab, string][]).map(([id, label]) => (
+                <button key={id} className={rosterTab === id ? "on" : ""} onClick={() => setRosterTab(id)}>{label}</button>
+              ))}
+            </div>
+            <div className="map-menu-body">
+              {rosterTab === "cities" ? (
+                g.myCities.length ? g.myCities.map((c) => (
+                  <div className="card" key={c.id}>
+                    <div>{c.name}<small>({c.x},{c.y}) · 战{c.wars.length}</small></div>
+                    <div className="row">
+                      <button className="btn tiny" onClick={() => jumpCity(c.id)}>定位</button>
+                      <button className="btn tiny" onClick={() => jumpCity(c.id, true)}>进入</button>
+                    </div>
+                  </div>
+                )) : <p className="muted">还没有城邦。在荒野加入建城指令。</p>
+              ) : null}
+              {rosterTab === "people" ? (
+                myCards.filter((c) => c.kind === "person").length === 0 ? <p className="muted">没有人物卡。</p> :
+                myCards.filter((c) => c.kind === "person").map((c) => (
+                  <div className="card" key={c.id} onClick={() => jumpCard(c.id)}>
+                    <div>{c.name}<small>{ROLES[c.role].name} · {cityNameOf(c.cityId)}{c.marchId ? " · 出征" : ""}{c.jobId ? " · 监工" : ""}</small></div>
+                    <button className="btn tiny">查找</button>
+                  </div>
+                ))
+              ) : null}
+              {rosterTab === "slaves" ? (
+                myCards.filter((c) => c.kind === "slave").length === 0 ? <p className="muted">没有奴隶卡。</p> :
+                myCards.filter((c) => c.kind === "slave").map((c) => (
+                  <div className="card" key={c.id} onClick={() => jumpCard(c.id)}>
+                    <div>{c.name}<small>{cityNameOf(c.cityId)}{c.marchId ? " · 出征" : ""}</small></div>
+                    <button className="btn tiny">查找</button>
+                  </div>
+                ))
+              ) : null}
+              {rosterTab === "goods" ? (
+                myCards.filter((c) => c.kind === "supply").length
+                  ? <p className="muted">物资卡 {myCards.filter((c) => c.kind === "supply").length} 张，按城存放，点城邦定位。</p>
+                  : <p className="muted">没有物资卡。</p>
+              ) : null}
+              {rosterTab === "goods" ? (
+                g.myCities.map((c) => {
+                  const n = myCards.filter((x) => x.kind === "supply" && x.cityId === c.id).length;
+                  if (!n) return null;
+                  return (
+                    <div className="card" key={c.id}>
+                      <div>{c.name}<small>物资 {n}</small></div>
+                      <button className="btn tiny" onClick={() => jumpCity(c.id)}>定位</button>
+                    </div>
+                  );
+                })
+              ) : null}
+              {rosterTab === "marches" ? (
+                myMarches.length ? myMarches.map((m) => (
+                  <div className="card" key={m.id} onClick={() => { g.setView({ x: m.toX, y: m.toY }); g.setSelected({ x: m.toX, y: m.toY }); setRosterOpen(false); }}>
+                    <div>{MISSION_NAME[m.mission]}<small>去 ({m.toX},{m.toY}) · {m.personIds.length} 人</small></div>
+                    <button className="btn tiny">查找</button>
+                  </div>
+                )) : <p className="muted">没有在途军团。</p>
+              ) : null}
+            </div>
+          </aside>
+        ) : null}
       </div>
 
       {modal !== "none" ? (
@@ -166,7 +282,11 @@ export function App() {
                 ) : selNpc ? (
                   <p>{selNpc.name} 固定在这格刷新，不会搬家。等级 {selNpc.level}。未攻下前看不到里面的人。</p>
                 ) : (
-                  <p>可建城的荒野。时间耗地形、城数、人物卡和奴隶卡。</p>
+                  <p>
+                    {g.myCities.length
+                      ? `开辟第二座城起：需要 ${COLONIZE_COST.persons} 张人物卡随行，并消耗奴隶 ${COLONIZE_COST.slaves}、物资 ${COLONIZE_COST.supplies}。选「开辟殖民市」出征。`
+                      : "可建第一座城。不耗卡。"}
+                  </p>
                 )}
                 {path?.ok ? <p className="muted">{path.naval ? "海路" : "陆路"} {path.dist} 格</p> : path && !path.ok ? <p className="err">{path.reason}</p> : null}
                 {blocked ? <p className="err">{blocked}</p> : null}

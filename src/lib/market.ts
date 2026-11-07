@@ -28,26 +28,6 @@ async function postWinston(jwk: Jwk, target: string, quantity: number, tags: Rec
   return tx.id;
 }
 
-export function localProofs(
-  buyer: string,
-  seller: string,
-  listingId: string,
-  winston: number,
-  cityId = "",
-): { payTx: string; burnTx: string; proofs: Record<string, TxProof> } {
-  const { pay, burn } = splitWinston(winston);
-  const payTx = `local-pay-${listingId}`;
-  const burnTx = `local-fee-${listingId}`;
-  return {
-    payTx,
-    burnTx,
-    proofs: {
-      [payTx]: { id: payTx, from: buyer, target: seller, winston: pay, listingId, cityId, kind: "sale" },
-      [burnTx]: { id: burnTx, from: buyer, target: AR_FEE_ADDR, winston: burn, listingId, cityId, kind: "fee" },
-    },
-  };
-}
-
 export async function payListing(
   jwk: Jwk,
   buyer: string,
@@ -55,14 +35,9 @@ export async function payListing(
   winston: number,
   cardId: string,
   listingId: string,
-  local: boolean,
   cityId = "",
 ): Promise<{ payTx: string; burnTx: string; pay: number; burn: number; proofs: Record<string, TxProof> }> {
   const { pay, burn } = splitWinston(winston);
-  if (local) {
-    const fake = localProofs(buyer, seller, listingId, winston, cityId);
-    return { ...fake, pay, burn };
-  }
   const common = {
     "App-Name": "Rexue-Chengbang",
     "Card-Id": cardId,

@@ -1,5 +1,5 @@
 import { berthOf, byIds, mintCard, slowest, uniqueId } from "./cards";
-import { AR_FEE_ADDR, BUILDINGS, MISSION_NAME, ROLES, scaleTime, splitWinston, SUPPLY_PER_SLAVE } from "./catalog";
+import { AR_FEE_ADDR, BUILDINGS, COLONIZE_COST, MISSION_NAME, ROLES, scaleTime, splitWinston, SUPPLY_PER_SLAVE } from "./catalog";
 import { citizensOf, garrisonPeople, garrisonShips, recruitCapOf, recruitableCount, worksOf } from "./citymath";
 import { resolveFight } from "./combat";
 import { canFound, cityIdAt, isCoast, npcAt, npcPower, respawnMs, terrainAt } from "./map";
@@ -135,6 +135,15 @@ function idleWorkers(world: World, cityId: string, owner: string): Card[] {
   return Object.values(world.cards)
     .filter((c) => c.cityId === cityId && c.owner === owner && c.kind === "person" && !c.marchId && !c.jobId && !c.listedWinston)
     .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function consumeKind(world: World, cityId: string, kind: "slave" | "supply", n: number): boolean {
+  const pool = Object.values(world.cards)
+    .filter((c) => c.cityId === cityId && c.kind === kind && !c.marchId && !c.jobId && !c.listedWinston)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  if (pool.length < n) return false;
+  for (let i = 0; i < n; i += 1) delete world.cards[pool[i].id];
+  return true;
 }
 
 function consumeMaterials(world: World, cityId: string, n: number): boolean {
@@ -421,7 +430,7 @@ function resolveArrival(world: World, march: March, t: number) {
       naval: march.naval,
       field: false,
       win: true,
-      rounds: [{ title: "开辟", text: `${city.name} 建立。此地宽度 ${city.frontage}，各建筑耗时因地形而异。` }],
+      rounds: [{ title: "开辟", text: `${city.name} 建立。消耗奴隶 ${COLONIZE_COST.slaves}、物资 ${COLONIZE_COST.supplies}，人物卡迁入新城。` }],
       deadNames: [],
       aftermath: "colonize",
     });
@@ -799,7 +808,18 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
       const weight = people.reduce((n, p) => n + p.berth, 0);
       if (weight > cap) return skip(world, cmd, `载重不足：泊位 ${cap} / 名册 ${weight}`);
     }
-    if (cmd.mission === "colonize" && people.length < 3) return skip(world, cmd, "殖民至少需要 3 张人物卡");
+    if (cmd.mission === "colonize") {
+      const persons = people.filter((p) => p.kind === "person");
+      if (persons.length < COLONIZE_COST.persons) {
+        return skip(world, cmd, `第二座城起需要 ${COLONIZE_COST.persons} 张人物卡随行`);
+      }
+      if (!consumeKind(world, city.id, "slave", COLONIZE_COST.slaves)) {
+        return skip(world, cmd, `殖民消耗 ${COLONIZE_COST.slaves} 张奴隶卡`);
+      }
+      if (!consumeKind(world, city.id, "supply", COLONIZE_COST.supplies)) {
+        return skip(world, cmd, `殖民消耗 ${COLONIZE_COST.supplies} 张物资卡`);
+      }
+    }
     const id = cmd.id;
     for (const cid of [...personIds, ...shipIds]) world.cards[cid].marchId = id;
     const speed = slowest([...people, ...ships]);

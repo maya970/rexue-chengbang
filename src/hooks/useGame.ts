@@ -3,24 +3,17 @@ import { foldHistory, playerCities, projectWorld } from "../engine/simulate";
 import { veilWorld } from "../engine/veil";
 import { loadChainState } from "../lib/chain";
 import {
-  drillFetch,
-  drillUpload,
-  drillWait,
   fetchSnapshot,
   newBatchKey,
   uploadBatch,
   waitUntilQueryable,
 } from "../lib/permabin";
-import { localProofs, payListing } from "../lib/market";
-import { clearJwk, createWallet, exportWallet, importWallet, jwkAddress, loadJwk, loadOrCreateLocalId, type Jwk } from "../lib/wallet";
-import type { Command, MarketPair, TrackedBatch, TxProof, WorldCheckpoint } from "../types";
-
-export type PlayMode = "local" | "permabin";
+import { payListing } from "../lib/market";
+import { clearJwk, createWallet, exportWallet, importWallet, jwkAddress, loadJwk, type Jwk } from "../lib/wallet";
+import type { Command, MarketPair, TrackedBatch, WorldCheckpoint } from "../types";
 
 export function useGame() {
-  const [mode, setMode] = useState<PlayMode>("local");
   const [jwk, setJwk] = useState<Jwk | null>(null);
-  const [localId] = useState(() => (typeof localStorage === "undefined" ? "local:guest" : loadOrCreateLocalId()));
   const [address, setAddress] = useState("");
   const [pending, setPending] = useState<Command[]>([]);
   const [batches, setBatches] = useState<TrackedBatch[]>([]);
@@ -39,37 +32,14 @@ export function useGame() {
   }, []);
 
   useEffect(() => {
-    setAddress(localId);
     const existing = loadJwk();
     if (!existing) return;
     setJwk(existing);
-  }, [localId]);
-
-  const setPlayMode = useCallback((next: PlayMode) => {
-    setMode(next);
-    setError("");
-    if (next === "local") {
-      setAddress(localId);
-      return;
-    }
-    if (jwk) {
-      jwkAddress(jwk).then(setAddress).catch(() => setError("本地钱包损坏，请重新导入"));
-    } else {
-      setAddress("");
-    }
-  }, [jwk, localId]);
+    jwkAddress(existing).then(setAddress).catch(() => setError("本地钱包损坏，请重新导入"));
+  }, []);
 
   const load = useCallback(async () => {
     try {
-      if (mode === "local") {
-        setBatches((prev) => {
-          const remote = drillFetch(address);
-          const confirmed = new Map(remote.map((b) => [b.key, b]));
-          const localOnly = prev.filter((b) => !confirmed.has(b.key) && (b.status === "queued" || b.status === "queued_uploaded" || b.status === "failed"));
-          return [...remote, ...localOnly];
-        });
-        return;
-      }
       const snap = await fetchSnapshot();
       const chain = await loadChainState(snap);
       setCheckpoint(chain.checkpoint);
@@ -86,18 +56,15 @@ export function useGame() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [mode, address]);
+  }, []);
 
   useEffect(() => {
     load();
-    const t = setInterval(load, mode === "local" ? 4000 : 15000);
+    const t = setInterval(load, 15000);
     return () => clearInterval(t);
-  }, [load, mode]);
+  }, [load]);
 
-  const folded = useMemo(
-    () => foldHistory(batches, mode === "permabin" ? checkpoint : null, mode === "permabin" ? pairs : []),
-    [batches, checkpoint, mode, pairs],
-  );
+  const folded = useMemo(() => foldHistory(batches, checkpoint, pairs), [batches, checkpoint, pairs]);
   const sim = useMemo(() => projectWorld(folded, now, view.x, view.y), [folded, now, view.x, view.y]);
   const world = useMemo(() => veilWorld(sim, address, focusCityId), [sim, address, focusCityId]);
   const myCities = address ? playerCities(sim, address) : [];
@@ -155,21 +122,13 @@ export function useGame() {
   }, []);
 
   const payForCard = useCallback(async (seller: string, winston: number, cardId: string, listingId: string, cityId: string) => {
-    if (mode === "local") {
-      if (!address) throw new Error("本地身份未就绪");
-      return payListing({} as Jwk, address, seller, winston, cardId, listingId, true, cityId);
-    }
-    if (!jwk || !address) throw new Error("联网需要游戏内钱包，打开即可生成，不用插件、不用点签名");
-    return payListing(jwk, address, seller, winston, cardId, listingId, false, cityId);
-  }, [jwk, mode, address]);
+    if (!jwk || !address) throw new Error("请先在游戏内创建钱包，无需插件或签名弹窗");
+    return payListing(jwk, address, seller, winston, cardId, listingId, cityId);
+  }, [jwk, address]);
 
   const execute = useCallback(async () => {
-    if (!address) {
-      setError(mode === "local" ? "本地身份未就绪" : "联网请先在游戏内创建钱包，无需插件或签名弹窗");
-      return;
-    }
-    if (mode === "permabin" && !jwk) {
-      setError("联网请先在游戏内创建或导入钱包");
+    if (!address || !jwk) {
+      setError("请先在游戏内创建或导入钱包，无需插件或签名弹窗");
       return;
     }
     if (!pending.length) {
@@ -179,15 +138,6 @@ export function useGame() {
     setError("");
     const key = newBatchKey();
     const commands = [...pending];
-    const proofs: Record<string, TxProof> = {};
-    if (mode === "local") {
-      for (const cmd of commands) {
-        if (cmd.kind !== "buy_card" || !cmd.listingId) continue;
-        const listing = sim.listings[cmd.listingId];
-        if (!listing) continue;
-        Object.assign(proofs, localProofs(address, listing.seller, listing.id, listing.winston, cmd.cityId || "").proofs);
-      }
-    }
     const tracked: TrackedBatch = {
       key,
       owner: address,
@@ -195,7 +145,7 @@ export function useGame() {
       commands,
       clientTime: Date.now(),
       status: "queued",
-      proofs,
+      proofs: {},
     };
     setBatches((b) => [...b, tracked]);
     setPending([]);
@@ -210,14 +160,14 @@ export function useGame() {
         clientTime: tracked.clientTime,
         commands,
       };
-      const { txId } = mode === "local" ? await drillUpload(pack) : await uploadBatch(pack, jwk!);
+      const { txId } = await uploadBatch(pack, jwk);
       setBatches((bs) => bs.map((b) => (b.key === key ? { ...b, status: "queued_uploaded", txId } : b)));
       setBusy("排队中（已上传）");
-      const confirmed = mode === "local" ? await drillWait(address, txId) : await waitUntilQueryable(txId);
+      const confirmed = await waitUntilQueryable(txId);
       setBatches((bs) =>
         bs.map((b) =>
           b.key === key
-            ? { ...b, status: "sent", txId, queryable: true, chainTime: confirmed.timestamp, proofs }
+            ? { ...b, status: "sent", txId, queryable: true, chainTime: confirmed.timestamp }
             : b,
         ),
       );
@@ -228,11 +178,9 @@ export function useGame() {
       setBusy("");
       setError(msg);
     }
-  }, [address, jwk, mode, pending, sim.listings]);
+  }, [address, jwk, pending]);
 
   return {
-    mode,
-    setMode: setPlayMode,
     address,
     pending,
     batches,

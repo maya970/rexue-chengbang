@@ -1,7 +1,6 @@
 import Arweave from "arweave";
 
 const KEY = "rexue-chengbang-jwk";
-const LOCAL_ID = "rexue-chengbang-local-id";
 const arweave = Arweave.init({ host: "arweave.net", port: 443, protocol: "https" });
 
 export type Jwk = Record<string, unknown>;
@@ -55,27 +54,5 @@ export function exportWallet(jwk: Jwk, address: string) {
 export function shortAddr(addr: string): string {
   if (!addr) return "";
   if (addr.startsWith("npc:")) return addr.replace("npc:", "蛮族·");
-  if (addr.startsWith("local:")) return `本地·${addr.slice(6, 10)}`;
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
-
-export function isLocalPlayer(addr: string): boolean {
-  return addr.startsWith("local:");
-}
-
-/** 本地模式的匿名身份。不是链上钱包，也不签名。 */
-export function loadOrCreateLocalId(): string {
-  try {
-    const existing = localStorage.getItem(LOCAL_ID);
-    if (existing && existing.startsWith("local:")) return existing;
-  } catch {
-    /* ignore */
-  }
-  const id = `local:${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-  try {
-    localStorage.setItem(LOCAL_ID, id);
-  } catch {
-    /* ignore */
-  }
-  return id;
 }

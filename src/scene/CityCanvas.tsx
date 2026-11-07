@@ -3,6 +3,35 @@ import * as THREE from "three";
 import { BUILDINGS, ROLES } from "../engine/catalog";
 import type { BuildingId, Card, City, World } from "../types";
 
+const BASE = import.meta.env.BASE_URL;
+
+function house(wall: THREE.Material, roof: THREE.Material, w: number, d: number, h: number) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wall);
+  body.position.y = h / 2;
+  body.castShadow = true;
+  body.receiveShadow = true;
+  const top = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.72, h * 0.55, 4), roof);
+  top.position.y = h + h * 0.22;
+  top.rotation.y = Math.PI / 4;
+  top.castShadow = true;
+  g.add(body, top);
+  const sill = new THREE.Mesh(new THREE.BoxGeometry(w * 0.22, h * 0.28, 0.06), new THREE.MeshStandardMaterial({ color: 0x1c1410 }));
+  sill.position.set(0, h * 0.55, d / 2 + 0.04);
+  g.add(sill);
+  return g;
+}
+
+function tree() {
+  const g = new THREE.Group();
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 0.7, 6), new THREE.MeshStandardMaterial({ color: 0x5a3a22 }));
+  trunk.position.y = 0.35;
+  const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(0.55, 0), new THREE.MeshStandardMaterial({ color: 0x3f7a3a, flatShading: true }));
+  leaf.position.y = 1.05;
+  g.add(trunk, leaf);
+  return g;
+}
+
 export function CityCanvas(props: {
   city: City;
   world: World;
@@ -22,152 +51,174 @@ export function CityCanvas(props: {
     renderer.setSize(el.clientWidth, el.clientHeight);
     renderer.shadowMap.enabled = true;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.2;
+    renderer.toneMappingExposure = 1.15;
     el.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1c1812);
-    scene.fog = new THREE.Fog(0x1c1812, 28, 90);
+    scene.background = new THREE.Color(0x87a07a);
+    scene.fog = new THREE.Fog(0x87a07a, 28, 55);
 
-    const camera = new THREE.PerspectiveCamera(52, el.clientWidth / el.clientHeight, 0.1, 200);
-    let yaw = 0.55;
-    let pitch = 0.42;
-    const orbit = 18;
+    const aspect = el.clientWidth / Math.max(1, el.clientHeight);
+    const view = 11;
+    const camera = new THREE.OrthographicCamera(-view * aspect, view * aspect, view, -view, 0.1, 80);
+    camera.position.set(16, 18, 16);
+    camera.lookAt(0, 0.4, 0);
 
-    scene.add(new THREE.HemisphereLight(0xffe8cc, 0x3a2a1c, 1.15));
-    const sun = new THREE.DirectionalLight(0xffe0b0, 2.05);
-    sun.position.set(10, 18, 8);
+    scene.add(new THREE.HemisphereLight(0xfff0d8, 0x3a4a30, 1.05));
+    const sun = new THREE.DirectionalLight(0xffe6c0, 1.8);
+    sun.position.set(12, 20, 8);
     sun.castShadow = true;
     scene.add(sun);
-    scene.add(new THREE.AmbientLight(0x6a5844, 0.65));
-    const torch = new THREE.PointLight(0xffaa66, 2.6, 22);
-    torch.position.set(0, 3.6, 0);
-    scene.add(torch);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
 
-    const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(18, 56),
-      new THREE.MeshStandardMaterial({ color: 0x8f7d5c, roughness: 0.88 }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    scene.add(ground);
+    const loader = new THREE.TextureLoader();
+    const cobble = loader.load(`${BASE}city/cobble.jpg`);
+    const grass = loader.load(`${BASE}city/grass.jpg`);
+    const wallTex = loader.load(`${BASE}city/wall.jpg`);
+    const roofTex = loader.load(`${BASE}city/roof.jpg`);
+    [cobble, grass, wallTex, roofTex].forEach((t) => {
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.colorSpace = THREE.SRGBColorSpace;
+    });
+    cobble.repeat.set(8, 8);
+    grass.repeat.set(10, 10);
+    wallTex.repeat.set(2, 2);
+    roofTex.repeat.set(2, 2);
 
-    const plaza = new THREE.Mesh(
-      new THREE.CircleGeometry(5.7, 48),
-      new THREE.MeshStandardMaterial({ color: 0xe4d4b6, roughness: 0.5 }),
-    );
+    const grassMat = new THREE.MeshStandardMaterial({ map: grass, roughness: 0.95 });
+    const cobbleMat = new THREE.MeshStandardMaterial({ map: cobble, roughness: 0.82 });
+    const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.7 });
+    const roofMat = new THREE.MeshStandardMaterial({ map: roofTex, roughness: 0.65 });
+
+    const lawn = new THREE.Mesh(new THREE.PlaneGeometry(36, 36), grassMat);
+    lawn.rotation.x = -Math.PI / 2;
+    lawn.receiveShadow = true;
+    scene.add(lawn);
+    const plaza = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), cobbleMat);
     plaza.rotation.x = -Math.PI / 2;
-    plaza.position.y = 0.03;
+    plaza.position.y = 0.02;
+    plaza.receiveShadow = true;
     scene.add(plaza);
 
-    const colGeo = new THREE.CylinderGeometry(0.18, 0.22, 3.4, 12);
+    const roadH = new THREE.Mesh(new THREE.PlaneGeometry(36, 2.2), cobbleMat);
+    roadH.rotation.x = -Math.PI / 2;
+    roadH.position.y = 0.015;
+    const roadV = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 36), cobbleMat);
+    roadV.rotation.x = -Math.PI / 2;
+    roadV.position.y = 0.015;
+    scene.add(roadH, roadV);
+
+    const fountain = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.3, 0.35, 16), new THREE.MeshStandardMaterial({ color: 0xcfc4b0 }));
+    fountain.position.y = 0.2;
+    const water = new THREE.Mesh(new THREE.CircleGeometry(0.75, 16), new THREE.MeshStandardMaterial({ color: 0x4aa0c8, roughness: 0.2, metalness: 0.3 }));
+    water.rotation.x = -Math.PI / 2;
+    water.position.y = 0.39;
+    scene.add(fountain, water);
+
+    const colGeo = new THREE.CylinderGeometry(0.14, 0.16, 2.6, 10);
     const marble = new THREE.MeshStandardMaterial({ color: 0xf3ead8, roughness: 0.35 });
-    for (let i = 0; i < 12; i += 1) {
-      const a = (i / 12) * Math.PI * 2;
+    for (let i = 0; i < 8; i += 1) {
+      const a = (i / 8) * Math.PI * 2;
       const col = new THREE.Mesh(colGeo, marble);
-      col.position.set(Math.cos(a) * 5.3, 1.7, Math.sin(a) * 5.3);
+      col.position.set(Math.cos(a) * 4.4, 1.3, Math.sin(a) * 4.4);
       col.castShadow = true;
       scene.add(col);
+    }
+
+    for (let i = 0; i < 10; i += 1) {
+      const tr = tree();
+      const a = (i / 10) * Math.PI * 2 + 0.2;
+      tr.position.set(Math.cos(a) * 11.5, 0, Math.sin(a) * 11.5);
+      scene.add(tr);
+    }
+
+    const lampMat = new THREE.MeshStandardMaterial({ color: 0xffcc77, emissive: 0x553300 });
+    for (const p of [[5.2, 5.2], [-5.2, 5.2], [5.2, -5.2], [-5.2, -5.2]]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.6, 6), new THREE.MeshStandardMaterial({ color: 0x3a2a18 }));
+      pole.position.set(p[0], 0.8, p[1]);
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), lampMat);
+      lamp.position.set(p[0], 1.65, p[1]);
+      scene.add(pole, lamp);
     }
 
     const bGroup = new THREE.Group();
     scene.add(bGroup);
     const pGroup = new THREE.Group();
     scene.add(pGroup);
-    const people = new Map<string, THREE.Group>();
-
-    const hall = new THREE.BoxGeometry(2.2, 1.8, 2.2);
-    const roof = new THREE.ConeGeometry(1.7, 1.1, 4);
+    const people = new Map<string, THREE.Sprite>();
 
     function layoutBuildings() {
       bGroup.clear();
       const { city } = latest.current;
       const ids = (Object.keys(BUILDINGS) as BuildingId[]).filter((id) => (city.buildings[id]?.level || 0) > 0);
+      const slots: [number, number][] = [
+        [0, -8.2], [7.4, -7.2], [-7.4, -7.2], [8.2, 0], [-8.2, 0], [7.2, 7.2], [-7.2, 7.2], [0, 8.4], [4.6, 8.2], [-4.6, 8.2],
+      ];
       ids.forEach((id, i) => {
-        const a = (i / Math.max(1, ids.length)) * Math.PI * 2;
-        const g = new THREE.Group();
         const lv = city.buildings[id]!.level;
-        g.position.set(Math.cos(a) * 8.6, 0, Math.sin(a) * 8.6);
-        const body = new THREE.Mesh(hall, new THREE.MeshStandardMaterial({ color: id === "harbor" ? 0x4a6d7a : 0xe8d6b2 }));
-        body.position.y = 0.9 + lv * 0.08;
-        body.scale.y = 1 + lv * 0.12;
-        body.userData = { building: id };
-        body.castShadow = true;
-        const top = new THREE.Mesh(roof, new THREE.MeshStandardMaterial({ color: 0x8a3e34 }));
-        top.position.y = 2.1 + lv * 0.12;
-        top.rotation.y = Math.PI / 4;
-        top.userData = { building: id };
-        g.add(body, top);
-        bGroup.add(g);
+        const h = house(wallMat, roofMat, 2.4 + lv * 0.08, 2.1, 1.5 + lv * 0.12);
+        const slot = slots[i % slots.length];
+        h.position.set(slot[0], 0, slot[1]);
+        h.traverse((o) => {
+          o.userData = { building: id };
+        });
+        bGroup.add(h);
       });
     }
 
-    const bodyGeo = new THREE.CapsuleGeometry(0.22, 0.55, 4, 8);
-    const headGeo = new THREE.SphereGeometry(0.16, 10, 10);
-    const crateGeo = new THREE.BoxGeometry(0.45, 0.32, 0.45);
+    const maps: Record<string, THREE.Texture> = {
+      person: loader.load(`${BASE}city/citizen.jpg`),
+      slave: loader.load(`${BASE}city/slave.jpg`),
+      hoplite: loader.load(`${BASE}city/hoplite.jpg`),
+    };
+    Object.values(maps).forEach((t) => {
+      t.colorSpace = THREE.SRGBColorSpace;
+    });
+
+    function spriteFor(card: Card) {
+      const tex = card.kind === "slave" ? maps.slave : card.role === "hoplite" ? maps.hoplite : maps.person;
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent: false });
+      const spr = new THREE.Sprite(mat);
+      spr.scale.set(1.15, 1.45, 1);
+      spr.userData = { cardId: card.id };
+      return spr;
+    }
 
     function layoutPeople(t: number) {
       const { city, world } = latest.current;
-      const cards = Object.values(world.cards).filter((c) => c.cityId === city.id && !c.marchId && c.kind !== "ship");
+      const cards = Object.values(world.cards).filter((c) => c.cityId === city.id && !c.marchId && (c.kind === "person" || c.kind === "slave"));
       const seen = new Set<string>();
-      cards.forEach((card: Card, i: number) => {
+      cards.forEach((card, i) => {
         seen.add(card.id);
-        let g = people.get(card.id);
-        if (!g) {
-          g = new THREE.Group();
-          if (card.kind === "supply") {
-            const crate = new THREE.Mesh(crateGeo, new THREE.MeshStandardMaterial({ color: 0xc4a35a, roughness: 0.6 }));
-            crate.userData = { cardId: card.id };
-            g.add(crate);
-          } else {
-            const tint = card.kind === "slave" ? 0x9a7a4a : card.campaigns.length > 4 ? 0xb8863d : 0xd8c4a0;
-            const body = new THREE.Mesh(bodyGeo, new THREE.MeshStandardMaterial({ color: tint, roughness: 0.55 }));
-            const head = new THREE.Mesh(headGeo, new THREE.MeshStandardMaterial({ color: 0xf0d0b0 }));
-            head.position.y = 0.62;
-            body.userData = { cardId: card.id };
-            head.userData = { cardId: card.id };
-            g.add(body, head);
-          }
-          people.set(card.id, g);
-          pGroup.add(g);
+        let spr = people.get(card.id);
+        if (!spr) {
+          spr = spriteFor(card);
+          people.set(card.id, spr);
+          pGroup.add(spr);
         }
-        const a = (i / Math.max(1, cards.length)) * Math.PI * 2 + t * 0.00018;
-        const r = card.kind === "supply" ? 3.4 + (i % 4) * 0.25 : 1.7 + (i % 5) * 0.42;
-        g.position.set(Math.cos(a) * r, card.kind === "supply" ? 0.2 : 0.55, Math.sin(a) * r);
-        g.rotation.y = a + Math.PI / 2;
+        const a = (i / Math.max(1, cards.length)) * Math.PI * 2 + t * 0.00012;
+        const r = 2.2 + (i % 4) * 0.45;
+        spr.position.set(Math.cos(a) * r, 0.75, Math.sin(a) * r);
       });
-      for (const [id, g] of people) {
+      for (const [id, spr] of people) {
         if (seen.has(id)) continue;
-        pGroup.remove(g);
+        pGroup.remove(spr);
         people.delete(id);
       }
     }
 
-    function placeCamera() {
-      camera.position.set(Math.cos(yaw) * orbit * Math.cos(pitch), 4 + Math.sin(pitch) * orbit, Math.sin(yaw) * orbit * Math.cos(pitch));
-      camera.lookAt(0, 1.15, 0);
-    }
-
+    layoutBuildings();
     let raf = 0;
     const loop = () => {
       raf = requestAnimationFrame(loop);
-      yaw += 0.0012;
       layoutPeople(latest.current.now);
-      placeCamera();
       renderer.render(scene, camera);
     };
-    layoutBuildings();
     loop();
 
     const ray = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
-    let dragging = false;
-    let lastX = 0;
-    let lastY = 0;
-    let moved = 0;
-
     function pick(ev: PointerEvent) {
-      if (moved > 6) return;
       const r = renderer.domElement.getBoundingClientRect();
       mouse.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
       mouse.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
@@ -177,42 +228,20 @@ export function CityCanvas(props: {
       if (data.building) latest.current.onBuilding(data.building);
       if (data.cardId) latest.current.onCard(data.cardId);
     }
-    function onDown(ev: PointerEvent) {
-      dragging = true;
-      moved = 0;
-      lastX = ev.clientX;
-      lastY = ev.clientY;
-    }
-    function onMove(ev: PointerEvent) {
-      if (!dragging) return;
-      const dx = ev.clientX - lastX;
-      const dy = ev.clientY - lastY;
-      lastX = ev.clientX;
-      lastY = ev.clientY;
-      moved += Math.abs(dx) + Math.abs(dy);
-      yaw -= dx * 0.008;
-      pitch = Math.max(0.12, Math.min(1.1, pitch + dy * 0.006));
-    }
-    function onUp(ev: PointerEvent) {
-      dragging = false;
-      pick(ev);
-    }
     function onResize() {
       const w = host.current?.clientWidth || renderer.domElement.clientWidth;
       const h = host.current?.clientHeight || renderer.domElement.clientHeight;
       renderer.setSize(w, h);
-      camera.aspect = w / Math.max(1, h);
+      const a = w / Math.max(1, h);
+      camera.left = -view * a;
+      camera.right = view * a;
       camera.updateProjectionMatrix();
     }
-    renderer.domElement.addEventListener("pointerdown", onDown);
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    renderer.domElement.addEventListener("pointerdown", pick);
     window.addEventListener("resize", onResize);
     return () => {
       cancelAnimationFrame(raf);
-      renderer.domElement.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+      renderer.domElement.removeEventListener("pointerdown", pick);
       window.removeEventListener("resize", onResize);
       renderer.dispose();
       el.removeChild(renderer.domElement);
@@ -226,11 +255,9 @@ export function CityCanvas(props: {
   return (
     <div className="canvas-host city-canvas" ref={host}>
       <div className="city-caption">
-        {props.city.name} · 拖转视角，点建筑或人物打开窗口 · {Object.values(props.world.cards).filter((c) => c.cityId === props.city.id && !c.marchId).length} 人在场
+        {props.city.name} · 锁定四分之三俯视 · 点建筑或人物打开窗口 · {Object.values(props.world.cards).filter((c) => c.cityId === props.city.id && !c.marchId).length} 人在场
         {" · "}
-        {BUILDINGS.acropolis.name}
-        {" / "}
-        {ROLES.hoplite.name}
+        {BUILDINGS.acropolis.name}/{ROLES.hoplite.name}
       </div>
     </div>
   );

@@ -10,6 +10,8 @@ export const AR_FEE_ADDR = "B1E8CDbmVVLuYHXiheFXbW4E0F1gpGBhpIWTOi2AFi0";
 export const MARKET_FEE = 0.1;
 export const SUPPLY_PER_SLAVE = 2;
 
+export const COLONIZE_COST = { persons: 3, slaves: 2, supplies: 2 };
+
 export function splitWinston(winston: number): { pay: number; burn: number } {
   const burn = Math.max(1, Math.floor(winston * MARKET_FEE));
   const pay = Math.max(1, winston - burn);

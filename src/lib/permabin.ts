@@ -13,34 +13,6 @@ export const arweave = Arweave.init({
   protocol: "https",
 });
 
-function drillKey(owner = ""): string {
-  return `rexue-chengbang-permabin-drill:${owner || "anon"}`;
-}
-
-interface DrillTx {
-  id: string;
-  readyAt: number;
-  batch: CommandBatch;
-}
-
-function drillRead(owner: string): DrillTx[] {
-  try {
-    return JSON.parse(localStorage.getItem(drillKey(owner)) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function drillWrite(owner: string, rows: DrillTx[]) {
-  localStorage.setItem(drillKey(owner), JSON.stringify(rows));
-}
-
-export async function shaId(data: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data));
-  const bytes = Array.from(new Uint8Array(buf));
-  return bytes.map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 43);
-}
-
 export function batchToTags(batch: CommandBatch): { name: string; value: string }[] {
   return [
     { name: "Content-Type", value: "application/json" },
@@ -168,49 +140,6 @@ export function mergeBatches(a: TrackedBatch[], b: TrackedBatch[]): TrackedBatch
     else if ((row.chainTime || 0) >= (prev.chainTime || 0)) map.set(k, { ...prev, ...row });
   }
   return [...map.values()];
-}
-
-export async function drillUpload(batch: CommandBatch): Promise<{ txId: string }> {
-  const txId = await shaId(JSON.stringify(batch) + Math.random());
-  const rows = drillRead(batch.owner);
-  rows.push({ id: txId, readyAt: Date.now() + 900, batch });
-  drillWrite(batch.owner, rows);
-  return { txId };
-}
-
-export async function drillQueryable(owner: string, txId: string): Promise<{ found: boolean; timestamp?: number }> {
-  const row = drillRead(owner).find((r) => r.id === txId);
-  if (!row) return { found: false };
-  if (Date.now() < row.readyAt) return { found: false };
-  return { found: true, timestamp: Date.now() };
-}
-
-export async function drillWait(owner: string, txId: string, onTick?: (n: number) => void): Promise<{ timestamp?: number }> {
-  const start = Date.now();
-  let n = 0;
-  while (Date.now() - start < 20000) {
-    n += 1;
-    onTick?.(n);
-    const q = await drillQueryable(owner, txId);
-    if (q.found) return { timestamp: q.timestamp };
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  throw new Error("演练库确认超时");
-}
-
-export function drillFetch(owner: string): TrackedBatch[] {
-  return drillRead(owner)
-    .filter((r) => Date.now() >= r.readyAt)
-    .map((r) => ({
-      key: r.batch.key,
-      owner: r.batch.owner,
-      commands: r.batch.commands,
-      clientTime: r.batch.clientTime,
-      status: "sent" as const,
-      txId: r.id,
-      chainTime: r.readyAt,
-      queryable: true,
-    }));
 }
 
 export function newBatchKey(): string {

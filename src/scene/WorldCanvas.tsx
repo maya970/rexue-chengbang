@@ -1,28 +1,18 @@
 import { useEffect, useRef } from "react";
-import * as THREE from "three";
 import { cityIdAt, npcAt, terrainAt } from "../engine/map";
 import { posAt } from "../engine/path";
-import type { World } from "../types";
+import type { City, World } from "../types";
+import { blit, drawFeCursor, overlaySprite, terrainSprite, TILE } from "./feTiles";
 
-const TILE = 4;
-const SPAN = 22;
-
-function colorOf(x: number, y: number): number {
-  const t = terrainAt(x, y);
-  if (t === "sea") return 0x2a7a96;
-  if (t === "coast") return 0xe0c08a;
-  if (t === "forest") return 0x3f7a4c;
-  if (t === "mountain") return 0x8a8276;
-  return 0x86b05f;
-}
-
-function heightOf(x: number, y: number): number {
-  const t = terrainAt(x, y);
-  if (t === "sea") return 0.35;
-  if (t === "coast") return 0.55;
-  if (t === "mountain") return 2.4;
-  if (t === "forest") return 0.95;
-  return 0.7;
+function kindOf(c: City): "city" | "village" | "tribe" | "ship" {
+  if (c.npc) {
+    if (c.owner.includes("pirate")) return "ship";
+    if (c.owner.includes("polis")) return "city";
+    if ((c.tribeLevel || 1) <= 3) return "village";
+    return "tribe";
+  }
+  const lv = (c.buildings.acropolis?.level || 0) + (c.buildings.oikos?.level || 0);
+  return lv <= 3 ? "village" : "city";
 }
 
 export function WorldCanvas(props: {
@@ -42,170 +32,126 @@ export function WorldCanvas(props: {
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    renderer.setSize(el.clientWidth, el.clientHeight);
-    renderer.shadowMap.enabled = true;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
-    el.appendChild(renderer.domElement);
+    const canvas = document.createElement("canvas");
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.display = "block";
+    canvas.style.cursor = "grab";
+    canvas.style.imageRendering = "pixelated";
+    el.appendChild(canvas);
+    const gfx = canvas.getContext("2d");
+    if (!gfx) return;
+    const ctx = gfx;
+    ctx.imageSmoothingEnabled = false;
 
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0b1418);
-    scene.fog = new THREE.FogExp2(0x0b1418, 0.012);
-
-    const camera = new THREE.PerspectiveCamera(48, el.clientWidth / el.clientHeight, 0.1, 400);
-    camera.position.set(18, 28, 28);
-
-    const sun = new THREE.DirectionalLight(0xffe6c4, 2.1);
-    sun.position.set(30, 55, 22);
-    sun.castShadow = true;
-    scene.add(sun);
-    scene.add(new THREE.HemisphereLight(0xb7d7ee, 0x4a3824, 1.05));
-    scene.add(new THREE.AmbientLight(0x6a5a44, 0.7));
-
-    const water = new THREE.Mesh(
-      new THREE.PlaneGeometry(420, 420),
-      new THREE.MeshStandardMaterial({ color: 0x143848, roughness: 0.35, metalness: 0.1 }),
-    );
-    water.rotation.x = -Math.PI / 2;
-    water.position.y = 0.05;
-    scene.add(water);
-
-    const tileGeo = new THREE.BoxGeometry(TILE * 0.96, 1, TILE * 0.96);
-    const tileMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82, metalness: 0.04 });
-    const tiles = new THREE.InstancedMesh(tileGeo, tileMat, SPAN * SPAN);
-    tiles.castShadow = true;
-    tiles.receiveShadow = true;
-    scene.add(tiles);
-
-    const citiesGroup = new THREE.Group();
-    scene.add(citiesGroup);
-    const actors = new THREE.Group();
-    scene.add(actors);
-
-    const marker = new THREE.Mesh(
-      new THREE.RingGeometry(1.3, 1.7, 24),
-      new THREE.MeshBasicMaterial({ color: 0xf3d9a0, side: THREE.DoubleSide }),
-    );
-    marker.rotation.x = -Math.PI / 2;
-    scene.add(marker);
-
-    const look = new THREE.Vector3();
+    let zoom = 3;
     let dragging = false;
+    let moved = 0;
     let lastX = 0;
     let lastY = 0;
-    let dirty = true;
-
-    const dummy = new THREE.Object3D();
-    const color = new THREE.Color();
-
-    function syncTiles() {
-      const { view } = latest.current;
-      const ox = view.x - Math.floor(SPAN / 2);
-      const oy = view.y - Math.floor(SPAN / 2);
-      let i = 0;
-      for (let j = 0; j < SPAN; j += 1) {
-        for (let k = 0; k < SPAN; k += 1) {
-          const x = ox + k;
-          const y = oy + j;
-          const h = heightOf(x, y);
-          dummy.position.set(x * TILE, h / 2, y * TILE);
-          dummy.scale.set(1, h, 1);
-          dummy.updateMatrix();
-          tiles.setMatrixAt(i, dummy.matrix);
-          color.setHex(colorOf(x, y));
-          tiles.setColorAt(i, color);
-          i += 1;
-        }
-      }
-      tiles.instanceMatrix.needsUpdate = true;
-      if (tiles.instanceColor) tiles.instanceColor.needsUpdate = true;
-      look.set(view.x * TILE, 0, view.y * TILE);
-    }
-
-    const templeGeo = new THREE.CylinderGeometry(1.1, 1.4, 2.2, 8);
-    const hutGeo = new THREE.ConeGeometry(1.3, 1.8, 5);
-    const poleGeo = new THREE.SphereGeometry(0.55, 10, 10);
-    const marble = new THREE.MeshStandardMaterial({ color: 0xe8d9b8, roughness: 0.45 });
-    const rust = new THREE.MeshStandardMaterial({ color: 0x8a4a28, roughness: 0.7 });
-    const gold = new THREE.MeshStandardMaterial({ color: 0xd4b45a, roughness: 0.4 });
-    const bone = new THREE.MeshStandardMaterial({ color: 0xc2b49a, roughness: 0.55 });
-    const enemy = new THREE.MeshStandardMaterial({ color: 0x7a2a2a, roughness: 0.5 });
-
-    function syncCities() {
-      citiesGroup.clear();
-      const { world, address } = latest.current;
-      for (const c of Object.values(world.cities)) {
-        const g = new THREE.Group();
-        g.position.set(c.x * TILE, heightOf(c.x, c.y), c.y * TILE);
-        const mesh = new THREE.Mesh(c.npc ? (c.tribeLevel && c.tribeLevel > 8 ? templeGeo : hutGeo) : templeGeo, c.npc ? (c.owner.includes("tribe") || c.owner.includes("camp") ? rust : enemy) : marble);
-        mesh.castShadow = true;
-        mesh.userData = { cityId: c.id, x: c.x, y: c.y };
-        g.add(mesh);
-        const flag = new THREE.Mesh(poleGeo, c.owner === address ? gold : bone);
-        flag.position.y = 1.8;
-        g.add(flag);
-        if (c.tribeLevel) {
-          const lv = Math.min(1.6, 0.5 + c.tribeLevel * 0.08);
-          mesh.scale.setScalar(lv);
-        }
-        citiesGroup.add(g);
-      }
-    }
-
-    const marchGeo = new THREE.SphereGeometry(0.45, 12, 12);
-    const marchMat = new THREE.MeshStandardMaterial({ color: 0xffe08a, emissive: 0x664400 });
-    const npcMarch = new THREE.MeshStandardMaterial({ color: 0xff6a4a, emissive: 0x401000 });
-
-    function syncActors(now: number) {
-      actors.clear();
-      for (const m of Object.values(latest.current.world.marches)) {
-        const p = posAt(m.path, m.startAt, m.arriveAt, now);
-        const ball = new THREE.Mesh(marchGeo, m.owner.startsWith("npc:") ? npcMarch : marchMat);
-        ball.position.set(p.x * TILE, heightOf(p.x, p.y) + 1.2, p.y * TILE);
-        actors.add(ball);
-      }
-    }
-
-    function frame() {
-      const { view, selected, now } = latest.current;
-      if (dirty) {
-        syncTiles();
-        syncCities();
-        dirty = false;
-      }
-      syncActors(now);
-      if (selected) {
-        marker.visible = true;
-        marker.position.set(selected.x * TILE, heightOf(selected.x, selected.y) + 0.08, selected.y * TILE);
-      } else marker.visible = false;
-      camera.lookAt(view.x * TILE, 0.4, view.y * TILE);
-      renderer.render(scene, camera);
-    }
-
     let raf = 0;
+
+    function tilePx() {
+      return TILE * zoom;
+    }
+
+    function resize() {
+      const box = host.current;
+      if (!box) return;
+      const r = box.getBoundingClientRect();
+      const dpr = Math.max(1, Math.round(devicePixelRatio || 1));
+      canvas.width = Math.max(1, Math.floor(r.width * dpr));
+      canvas.height = Math.max(1, Math.floor(r.height * dpr));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+    }
+
+    function viewSize() {
+      const dpr = Math.max(1, Math.round(devicePixelRatio || 1));
+      return { cssW: canvas.width / dpr, cssH: canvas.height / dpr };
+    }
+
+    function tileAt(px: number, py: number) {
+      const { view } = latest.current;
+      const { cssW, cssH } = viewSize();
+      const s = tilePx();
+      const ox = view.x - cssW / s / 2;
+      const oy = view.y - cssH / s / 2;
+      return { x: Math.floor(ox + px / s), y: Math.floor(oy + py / s) };
+    }
+
+    function draw() {
+      const { view, selected, world, now, address } = latest.current;
+      const { cssW, cssH } = viewSize();
+      const s = tilePx();
+      const frame = Math.floor(now / 380) % 2;
+      const walk = Math.floor(now / 220) % 2;
+      const ox = view.x - cssW / s / 2;
+      const oy = view.y - cssH / s / 2;
+      const startX = Math.floor(ox);
+      const startY = Math.floor(oy);
+      const shiftX = Math.round((startX - ox) * s);
+      const shiftY = Math.round((startY - oy) * s);
+      const cols = Math.ceil(cssW / s) + 2;
+      const rows = Math.ceil(cssH / s) + 2;
+
+      ctx.imageSmoothingEnabled = false;
+      ctx.fillStyle = "#0e4068";
+      ctx.fillRect(0, 0, cssW, cssH);
+
+      for (let j = 0; j < rows; j += 1) {
+        for (let k = 0; k < cols; k += 1) {
+          const tx = startX + k;
+          const ty = startY + j;
+          const t = terrainAt(tx, ty);
+          const spr = terrainSprite(t, tx, ty, frame);
+          blit(ctx, spr, k * s + shiftX, j * s + shiftY, zoom);
+        }
+      }
+
+      ctx.fillStyle = "rgba(16, 24, 12, 0.18)";
+      for (let j = 0; j < rows; j += 1) {
+        ctx.fillRect(0, j * s + shiftY, cssW, 1);
+      }
+      for (let k = 0; k < cols; k += 1) {
+        ctx.fillRect(k * s + shiftX, 0, 1, cssH);
+      }
+
+      for (const c of Object.values(world.cities)) {
+        const px = Math.round((c.x - ox) * s);
+        const py = Math.round((c.y - oy) * s);
+        if (px < -s || py < -s || px > cssW || py > cssH) continue;
+        blit(ctx, overlaySprite(kindOf(c)), px, py, zoom);
+        if (c.owner === address) blit(ctx, overlaySprite("flag"), px, py, zoom);
+      }
+
+      for (const m of Object.values(world.marches)) {
+        const p = posAt(m.path, m.startAt, m.arriveAt, now);
+        const px = Math.round((p.x - ox) * s);
+        const py = Math.round((p.y - oy) * s) - walk;
+        blit(ctx, overlaySprite("army", walk), px, py, zoom);
+      }
+
+      if (selected) {
+        const sx = Math.round((selected.x - ox) * s);
+        const sy = Math.round((selected.y - oy) * s);
+        drawFeCursor(ctx, sx, sy, s, now);
+      }
+    }
+
     const loop = () => {
       raf = requestAnimationFrame(loop);
-      frame();
+      draw();
     };
+    resize();
     loop();
-
-    const ray = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const hit = new THREE.Vector3();
-
-    function ndc(ev: { clientX: number; clientY: number }) {
-      const r = renderer.domElement.getBoundingClientRect();
-      mouse.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
-      mouse.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
-    }
 
     function onDown(ev: PointerEvent) {
       dragging = true;
+      moved = 0;
       lastX = ev.clientX;
       lastY = ev.clientY;
+      canvas.style.cursor = "grabbing";
     }
     function onMove(ev: PointerEvent) {
       if (!dragging) return;
@@ -213,73 +159,46 @@ export function WorldCanvas(props: {
       const dy = ev.clientY - lastY;
       lastX = ev.clientX;
       lastY = ev.clientY;
-      const nx = latest.current.view.x - dx * 0.04;
-      const ny = latest.current.view.y - dy * 0.04;
+      moved += Math.abs(dx) + Math.abs(dy);
+      const s = tilePx();
+      const nx = latest.current.view.x - dx / s;
+      const ny = latest.current.view.y - dy / s;
       latest.current.onView(nx, ny);
       latest.current = { ...latest.current, view: { x: nx, y: ny } };
-      dirty = true;
     }
     function onUp(ev: PointerEvent) {
       dragging = false;
-      ndc(ev);
-      ray.setFromCamera(mouse, camera);
-      const cityHits = ray.intersectObjects(citiesGroup.children, true);
-      if (cityHits[0]) {
-        const data = cityHits[0].object.userData;
-        if (data.cityId) {
-          latest.current.onSelect(data.x, data.y);
-          return;
-        }
-      }
-      if (ray.ray.intersectPlane(plane, hit)) {
-        const x = Math.round(hit.x / TILE);
-        const y = Math.round(hit.z / TILE);
-        latest.current.onSelect(x, y);
-      }
+      canvas.style.cursor = "grab";
+      if (moved > 8) return;
+      const r = canvas.getBoundingClientRect();
+      const t = tileAt(ev.clientX - r.left, ev.clientY - r.top);
+      latest.current.onSelect(t.x, t.y);
+    }
+    function onDbl(ev: MouseEvent) {
+      const r = canvas.getBoundingClientRect();
+      const t = tileAt(ev.clientX - r.left, ev.clientY - r.top);
+      const id = cityIdAt(t.x, t.y);
+      if (latest.current.world.cities[id]) latest.current.onEnterCity(id);
     }
     function onWheel(ev: WheelEvent) {
       ev.preventDefault();
-      camera.position.y = Math.min(70, Math.max(12, camera.position.y + ev.deltaY * 0.03));
-      camera.position.z = Math.min(80, Math.max(10, camera.position.z + ev.deltaY * 0.02));
+      zoom = Math.min(5, Math.max(2, zoom - Math.sign(ev.deltaY)));
     }
-    function onDbl(ev: MouseEvent) {
-      ndc(ev);
-      ray.setFromCamera(mouse, camera);
-      const cityHits = ray.intersectObjects(citiesGroup.children, true);
-      const data = cityHits[0]?.object.userData;
-      if (data?.cityId) latest.current.onEnterCity(data.cityId);
-    }
-    function onResize() {
-      const w = host.current?.clientWidth || renderer.domElement.clientWidth;
-      const h = host.current?.clientHeight || renderer.domElement.clientHeight;
-      renderer.setSize(w, h);
-      camera.aspect = w / Math.max(1, h);
-      camera.updateProjectionMatrix();
-    }
-
-    renderer.domElement.addEventListener("pointerdown", onDown);
+    canvas.addEventListener("pointerdown", onDown);
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-    renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
-    renderer.domElement.addEventListener("dblclick", onDbl);
-    window.addEventListener("resize", onResize);
-
-    const syncView = () => {
-      dirty = true;
-    };
-    const iv = setInterval(syncView, 400);
-
+    canvas.addEventListener("dblclick", onDbl);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("resize", resize);
     return () => {
       cancelAnimationFrame(raf);
-      clearInterval(iv);
-      renderer.domElement.removeEventListener("pointerdown", onDown);
+      canvas.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      renderer.domElement.removeEventListener("wheel", onWheel);
-      renderer.domElement.removeEventListener("dblclick", onDbl);
-      window.removeEventListener("resize", onResize);
-      renderer.dispose();
-      el.removeChild(renderer.domElement);
+      canvas.removeEventListener("dblclick", onDbl);
+      canvas.removeEventListener("wheel", onWheel);
+      window.removeEventListener("resize", resize);
+      el.removeChild(canvas);
     };
   }, []);
 
@@ -287,7 +206,7 @@ export function WorldCanvas(props: {
     latest.current = props;
   });
 
-  return <div className="canvas-host" ref={host} title="拖动平移，滚轮远近，双击进城" />;
+  return <div className="canvas-host pixel-map" ref={host} title="像素大地图。拖动平移，滚轮缩放，双击进城" />;
 }
 
 export function tileHint(x: number, y: number) {
