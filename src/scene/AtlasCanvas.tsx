@@ -138,6 +138,7 @@ export function AtlasCanvas(props: {
       panY -= dy / cell;
     }
     function onUp(ev: PointerEvent) {
+      if (!dragging) return;
       dragging = false;
       canvas.style.cursor = "grab";
       if (moved > 8) return;

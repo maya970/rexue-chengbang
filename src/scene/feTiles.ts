@@ -365,6 +365,7 @@ export function terrainSprite(kind: "plain" | "forest" | "mountain" | "coast" | 
     const { c, ctx } = sheet(TILE, TILE);
     paint(ctx, grass(v, true));
     paint(ctx, trees());
+    if (v % 2 === 0) paint(ctx, trees(), -4, 2);
     cache.set(key, c);
     return c;
   }

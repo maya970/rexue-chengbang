@@ -51,7 +51,8 @@ export function useGame() {
         const confirmed = new Map(remote.map((b) => [b.txId || b.key, b]));
         const localOnly = prev.filter((b) => {
           const k = b.txId || b.key;
-          return !confirmed.has(k) && (b.status === "queued" || b.status === "queued_uploaded" || b.status === "failed");
+          if (confirmed.has(k) || (b.txId && confirmed.has(b.txId))) return false;
+          return b.status === "queued" || b.status === "queued_uploaded" || b.status === "sent" || b.status === "failed";
         });
         return [...remote, ...localOnly];
       });

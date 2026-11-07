@@ -3,7 +3,8 @@ import { chartHeights } from "../engine/height";
 import { chartOrigin, CHART, cityIdAt, npcAt, terrainAt } from "../engine/map";
 import { posAt } from "../engine/path";
 import type { City, World } from "../types";
-import { drawBlock, inBlock, palette, project, TH, TW } from "./iso";
+import { overlaySprite, terrainSprite, TILE } from "./feTiles";
+import { drawBlock, drawIsoSprite, inBlock, landDrop, palette, project, textureIsoTop, TH, TW } from "./iso";
 
 function kindOf(c: City): "city" | "village" | "tribe" | "ship" {
   if (c.npc) {
@@ -16,13 +17,6 @@ function kindOf(c: City): "city" | "village" | "tribe" | "ship" {
   const lv = (c.buildings.acropolis?.level || 0) + (c.buildings.oikos?.level || 0);
   return lv <= 3 ? "village" : "city";
 }
-
-const MARK = {
-  city: { top: "#c83828", left: "#6a1818", right: "#8a2828" },
-  village: { top: "#c06048", left: "#6a3020", right: "#8a4430" },
-  tribe: { top: "#8a6840", left: "#4a3020", right: "#6a4830" },
-  ship: { top: "#4a90b8", left: "#204858", right: "#306878" },
-};
 
 export function WorldCanvas(props: {
   world: World;
@@ -106,10 +100,11 @@ export function WorldCanvas(props: {
         for (let lx = CHART - 1; lx >= 0; lx -= 1) {
           const ly = sum - lx;
           if (ly < 0 || ly >= CHART) continue;
-          const elev = grid[ly][lx];
-          const se = ly + 1 < CHART ? grid[ly + 1][lx] : 0;
-          const drop = Math.max(1, elev - se + 1);
-          const p = project(lx, ly, elev, ox, oy, zoom);
+          const elev = grid[ly]?.[lx] ?? 0;
+          const se = ly + 1 < CHART ? (grid[ly + 1]?.[lx] ?? 0) : 0;
+          const t = terrainAt(origin.x + lx, origin.y + ly);
+          const drop = t === "sea" ? 0.25 : landDrop(elev, se);
+          const p = project(lx, ly, t === "sea" ? 0 : elev, ox, oy, zoom);
           if (inBlock(px, py, p.x, p.y, zoom, drop)) return { x: origin.x + lx, y: origin.y + ly };
         }
       }
@@ -122,7 +117,7 @@ export function WorldCanvas(props: {
       const frame = Math.floor(now / 380) % 2;
       const walk = Math.floor(now / 220) % 2;
       ctx.imageSmoothingEnabled = false;
-      ctx.fillStyle = "#071820";
+      ctx.fillStyle = "#0a2430";
       ctx.fillRect(0, 0, cssW, cssH);
 
       for (let sum = 0; sum <= CHART * 2; sum += 1) {
@@ -132,20 +127,17 @@ export function WorldCanvas(props: {
           const tx = origin.x + lx;
           const ty = origin.y + ly;
           const t = terrainAt(tx, ty);
-          const elev = grid[ly]?.[lx] ?? 0;
-          const se = ly + 1 < CHART ? (grid[ly + 1]?.[lx] ?? 0) : 0;
-          const drop = t === "sea" ? 1 : Math.max(1, elev - se + 1);
+          const elev = t === "sea" ? 0 : (grid[ly]?.[lx] ?? 0);
+          const se = ly + 1 < CHART && terrainAt(tx, ty + 1) !== "sea" ? (grid[ly + 1]?.[lx] ?? 0) : 0;
           const p = project(lx, ly, elev, ox, oy, zoom);
+          const spr = terrainSprite(t, tx, ty, frame);
+          if (t === "sea") {
+            textureIsoTop(ctx, p.x, p.y, zoom, spr, false);
+            continue;
+          }
           const pal = palette(t, frame);
-          drawBlock(ctx, p.x, p.y, zoom, drop, pal.top, pal.left, pal.right);
-          if (t === "forest" && elev > 0) {
-            const q = project(lx, ly, elev + 1, ox, oy, zoom);
-            drawBlock(ctx, q.x, q.y, zoom, 1, "#3e8a48", "#1c4a24", "#2e6a34");
-          }
-          if (t === "mountain" && elev > 2) {
-            const q = project(lx, ly, elev + 1, ox, oy, zoom);
-            drawBlock(ctx, q.x, q.y, zoom, 1, "#e8e0d4", "#6a6058", "#8a8078");
-          }
+          drawBlock(ctx, p.x, p.y, zoom, landDrop(elev, se), pal.top, pal.left, pal.right);
+          textureIsoTop(ctx, p.x, p.y, zoom, spr);
         }
       }
 
@@ -153,13 +145,13 @@ export function WorldCanvas(props: {
         if (c.x < origin.x || c.y < origin.y || c.x >= origin.x + CHART || c.y >= origin.y + CHART) continue;
         const lx = Math.floor(c.x - origin.x);
         const ly = Math.floor(c.y - origin.y);
-        const elev = grid[ly]?.[lx] ?? 0;
-        const mark = MARK[kindOf(c)];
-        const q = project(lx, ly, elev + 2, ox, oy, zoom);
-        drawBlock(ctx, q.x, q.y, zoom, 2, mark.top, mark.left, mark.right);
+        const t = terrainAt(c.x, c.y);
+        const elev = t === "sea" ? 0 : (grid[ly]?.[lx] ?? 0);
+        const q = project(lx, ly, elev, ox, oy, zoom);
+        const kind = kindOf(c);
+        drawIsoSprite(ctx, q.x, q.y, zoom * 1.15, overlaySprite(kind), TILE);
         if (c.owner === address) {
-          ctx.fillStyle = "#f0c040";
-          ctx.fillRect(q.x - zoom, q.y - 3 * zoom, 2 * zoom, 3 * zoom);
+          drawIsoSprite(ctx, q.x + 6 * zoom, q.y - 4 * zoom, zoom, overlaySprite("flag"), 8);
         }
       }
 
@@ -168,15 +160,18 @@ export function WorldCanvas(props: {
         if (pos.x < origin.x || pos.y < origin.y || pos.x >= origin.x + CHART || pos.y >= origin.y + CHART) continue;
         const lx = pos.x - origin.x;
         const ly = pos.y - origin.y;
-        const elev = grid[Math.floor(ly)]?.[Math.floor(lx)] || 0;
-        const q = project(lx, ly, elev + 1, ox, oy, zoom);
-        drawBlock(ctx, q.x, q.y - walk, zoom, 1, "#3868b0", "#1c3458", "#2a4c80");
+        const t = terrainAt(Math.floor(pos.x), Math.floor(pos.y));
+        const elev = t === "sea" ? 0 : (grid[Math.floor(ly)]?.[Math.floor(lx)] || 0);
+        const q = project(lx, ly, elev, ox, oy, zoom);
+        drawIsoSprite(ctx, q.x, q.y - walk, zoom, overlaySprite("army", walk), TILE);
       }
 
       if (selected && selected.x >= origin.x && selected.y >= origin.y && selected.x < origin.x + CHART && selected.y < origin.y + CHART) {
         const lx = Math.floor(selected.x - origin.x);
         const ly = Math.floor(selected.y - origin.y);
-        const p = project(lx, ly, grid[ly]?.[lx] ?? 0, ox, oy, zoom);
+        const t = terrainAt(selected.x, selected.y);
+        const elev = t === "sea" ? 0 : (grid[ly]?.[lx] ?? 0);
+        const p = project(lx, ly, elev, ox, oy, zoom);
         ctx.strokeStyle = "#f8f0a8";
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -226,6 +221,7 @@ export function WorldCanvas(props: {
       latest.current = { ...latest.current, view: { x: nx, y: ny } };
     }
     function onUp(ev: PointerEvent) {
+      if (!dragging) return;
       dragging = false;
       canvas.style.cursor = "grab";
       if (moved > 8) return;
@@ -265,7 +261,7 @@ export function WorldCanvas(props: {
     latest.current = props;
   });
 
-  return <div className="canvas-host pixel-map" ref={host} title="大地图：45°立体俯视，能看出山地高度" />;
+  return <div className="canvas-host pixel-map" ref={host} title="大地图：像素地块，水面平坦，陆地缓坡连通" />;
 }
 
 export function tileHint(x: number, y: number) {

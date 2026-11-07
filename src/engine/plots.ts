@@ -1,6 +1,6 @@
 import { BUILDING_PLOTS, BUILDINGS, CITY_H, CITY_W, PLOT_ELEV, PLOT_TIME } from "./catalog";
 import { hashXY, terrainAt } from "./map";
-import { raiseConnect } from "./height";
+import { slopeConnect } from "./height";
 import type { BuildingId, City, CityPlot, PlotKind, Terrain } from "../types";
 
 const MIX: Record<Terrain, Record<PlotKind, number>> = {
@@ -40,7 +40,7 @@ export function makeCityHeights(wx: number, wy: number): number[][] {
       grid[ly][lx] = Math.max(0, Math.min(4, h));
     }
   }
-  raiseConnect(grid);
+  slopeConnect(grid, (x, y) => grid[y][x] <= 0);
   return grid;
 }
 
@@ -69,7 +69,10 @@ export function cityHeightGrid(city: City): number[][] {
         grid[ly][lx] = nbs.length ? Math.round(nbs.reduce((a, b) => a + b, 0) / nbs.length) : 1;
       }
     }
-    raiseConnect(grid);
+    for (const p of city.plots) {
+      if (p.kind === "harbor" && p.ly >= 0 && p.ly < CITY_H && p.lx >= 0 && p.lx < CITY_W) grid[p.ly][p.lx] = 0;
+    }
+    slopeConnect(grid, (x, y) => grid[y][x] <= 0);
     return grid;
   }
   return makeCityHeights(city.x, city.y);

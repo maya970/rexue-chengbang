@@ -109,11 +109,11 @@ function makeNpcCity(world: World, x: number, y: number, garrison = false) {
   if (!world.cities[id]) {
     world.cities[id] = {
       id,
-      owner: `npc:${site.kind}`,
-      name: site.name,
-      x,
-      y,
-      buildings: {
+    owner: `npc:${site.kind}`,
+    name: site.name,
+    x,
+    y,
+    buildings: {
         acropolis: { level: Math.min(8, 1 + Math.floor(site.level / 3)), wars: [] },
         oikos: { level: Math.min(6, 1 + Math.floor(site.level / 4)), wars: [] },
         wall: { level: site.kind === "polis" ? 3 : Math.max(1, Math.floor(site.level / 5)), wars: [] },
@@ -121,8 +121,8 @@ function makeNpcCity(world: World, x: number, y: number, garrison = false) {
         harbor: isCoast(terrainAt(x, y)) ? { level: 1, wars: [] } : undefined,
         shipyard: site.kind === "pirates" ? { level: 2, wars: [] } : undefined,
       },
-      foundedAt: 0,
-      npc: true,
+    foundedAt: 0,
+    npc: true,
       frontage: frontageAt(x, y),
       buildMult: buildMultAt(x, y),
       wars: [],
@@ -1120,12 +1120,13 @@ function afterCheckpoint(time: number, key: string, checkpoint?: WorldCheckpoint
 
 function sentEvents(batches: TrackedBatch[], pairs: MarketPair[], checkpoint?: WorldCheckpoint | null) {
   const batchEv = batches
-    .filter((b) => b.status === "sent" || (b.queryable && b.txId))
-    .filter((b) => b.chainTime && afterCheckpoint(b.chainTime, b.key, checkpoint))
-    .map((b) => ({
+    .filter((b) => b.status === "sent" || b.status === "queued" || b.status === "queued_uploaded" || (b.queryable && b.txId))
+    .map((b) => ({ b, time: b.chainTime || b.clientTime }))
+    .filter(({ b, time }) => time && afterCheckpoint(time, b.key, checkpoint))
+    .map(({ b, time }) => ({
       kind: "batch" as const,
       owner: b.signer || b.owner,
-      time: b.chainTime as number,
+      time,
       commands: b.commands,
       key: b.key,
       txId: b.txId || b.key,
@@ -1205,7 +1206,14 @@ export function rebuildWorld(
 }
 
 export function playerCities(world: World, owner: string): City[] {
-  return Object.values(world.cities).filter((c) => c.owner === owner && !c.npc);
+  if (!owner) return [];
+  const mine = Object.values(world.cities).filter((c) => c.owner === owner && !c.npc);
+  if (mine.length) return mine;
+  const fromCards = new Set(
+    Object.values(world.cards).filter((c) => c.owner === owner && c.cityId).map((c) => c.cityId),
+  );
+  const owned = Object.values(world.cities).filter((c) => c.owner === owner || fromCards.has(c.id));
+  return owned;
 }
 
 export { citizensOf, recruitCapOf, worksOf, garrisonPeople, garrisonShips, MISSION_NAME };

@@ -37,6 +37,25 @@ export function App() {
   const [cardId, setCardId] = useState<string>("");
   const [listAr, setListAr] = useState("0.1");
   const [rosterOpen, setRosterOpen] = useState(false);
+  const [atlasOpen, setAtlasOpen] = useState(false);
+  const [cityPins, setCityPins] = useState<{ id: string; name: string; x: number; y: number }[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("rexue-chengbang-my-cities") || "[]") as { id: string; name: string; x: number; y: number }[];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    if (!g.myCities.length) return;
+    const pins = g.myCities.map((c) => ({ id: c.id, name: c.name, x: c.x, y: c.y }));
+    setCityPins(pins);
+    try {
+      localStorage.setItem("rexue-chengbang-my-cities", JSON.stringify(pins));
+    } catch { /* ignore */ }
+  }, [g.myCities]);
+
+  const rosterCities = g.myCities.length ? g.myCities : cityPins;
   const [rosterTab, setRosterTab] = useState<RosterTab>("cities");
   const [fromCityId, setFromCityId] = useState("");
   const [plotId, setPlotId] = useState("");
@@ -133,15 +152,17 @@ export function App() {
   const cityNameOf = (id: string) => sim.cities[id]?.name || "途中";
 
   function jumpCity(id: string, enter = false) {
-    const c = sim.cities[id];
-    if (!c || c.owner !== g.address) return;
+    const c = sim.cities[id] || rosterCities.find((x) => x.id === id);
+    if (!c) return;
+    if (sim.cities[id] && sim.cities[id].owner !== g.address) return;
     g.setFocusCityId(c.id);
     setFromCityId(c.id);
     const ch = chartOf(c.x, c.y);
     g.enterChart(ch.cx, ch.cy, { x: c.x, y: c.y });
-    setInside(enter);
+    setInside(enter && Boolean(sim.cities[id]));
     setModal("none");
     setRosterOpen(false);
+    setAtlasOpen(false);
   }
 
   function jumpCard(id: string) {
@@ -185,11 +206,14 @@ export function App() {
           </button>
           <button className="btn tiny" onClick={() => setModal("market")}>货架</button>
           <button className="btn tiny" onClick={() => setModal("guild")}>公会</button>
-          <button className="btn tiny primary" onClick={() => setRosterOpen((v) => !v)}>
+          <button className="btn tiny" onClick={() => { setAtlasOpen((v) => !v); setRosterOpen(false); }}>
+            {atlasOpen ? "收起超大地图" : "超大地图"}
+          </button>
+          <button className="btn tiny primary" onClick={() => { setRosterOpen((v) => !v); setAtlasOpen(false); }}>
             {rosterOpen ? "收起名册" : "我的名册"}
           </button>
-          {g.myCities[0] && !inside ? (
-            <button className="btn tiny" onClick={() => jumpCity(g.myCities[0].id)}>一键回城</button>
+          {(g.myCities[0] || rosterCities[0]) && !inside ? (
+            <button className="btn tiny" onClick={() => jumpCity((g.myCities[0] || rosterCities[0]).id)}>一键回城</button>
           ) : null}
           {mine && !inside ? <button className="btn tiny" onClick={() => { setInside(true); setModal("none"); }}>进入城市</button> : null}
           {inside ? <button className="btn tiny" onClick={() => setInside(false)}>回到大地图</button> : null}
@@ -211,7 +235,7 @@ export function App() {
           }} />
           {g.address ? (
             <>
-              <span className="muted">{shortAddr(g.address)} · 本城 人{peopleN} 奴{slaveN} 物资{goods.length} 城{g.myCities.length}</span>
+              <span className="muted">{shortAddr(g.address)} · 本城 人{peopleN} 奴{slaveN} 物资{goods.length} 城{Math.max(g.myCities.length, rosterCities.length)}</span>
               <button className="btn" onClick={g.doExport}>导出钱包</button>
               <button className="btn" onClick={g.logout}>退出</button>
             </>
@@ -223,12 +247,6 @@ export function App() {
           )}
         </div>
       </header>
-
-      <AtlasCanvas
-        chart={g.chart}
-        cities={Object.values(sim.cities).map((c) => ({ x: c.x, y: c.y, mine: c.owner === g.address }))}
-        onEnter={(cx, cy) => { g.enterChart(cx, cy); setInside(false); setRosterOpen(false); }}
-      />
 
       <div className="stage">
         {inside && city && mine ? (
@@ -264,6 +282,21 @@ export function App() {
         ) : null}
       </div>
 
+      {atlasOpen ? (
+        <aside className="map-menu atlas-menu">
+          <div className="map-menu-head">
+            <b>超大地图</b>
+            <span className="muted">俯视总览，点一块进入大地图</span>
+            <button className="btn tiny" style={{ marginLeft: "auto" }} onClick={() => setAtlasOpen(false)}>关闭</button>
+          </div>
+          <AtlasCanvas
+            chart={g.chart}
+            cities={rosterCities.map((c) => ({ x: c.x, y: c.y, mine: true }))}
+            onEnter={(cx, cy) => { g.enterChart(cx, cy); setInside(false); setAtlasOpen(false); }}
+          />
+        </aside>
+      ) : null}
+
       {rosterOpen ? (
           <aside className="map-menu">
             <div className="map-menu-head">
@@ -284,9 +317,9 @@ export function App() {
             </div>
             <div className="map-menu-body">
               {rosterTab === "cities" ? (
-                g.myCities.length ? g.myCities.map((c) => (
+                rosterCities.length ? rosterCities.map((c) => (
                   <div className="card" key={c.id}>
-                    <div>{c.name}<small>({c.x},{c.y}) · 战{c.wars.length}</small></div>
+                    <div>{c.name}<small>({c.x},{c.y}){"wars" in c && Array.isArray(c.wars) ? ` · 战${c.wars.length}` : ""}</small></div>
                     <div className="row">
                       <button className="btn tiny" onClick={() => jumpCity(c.id)}>定位</button>
                       <button className="btn tiny" onClick={() => jumpCity(c.id, true)}>进入</button>

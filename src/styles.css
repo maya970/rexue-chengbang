@@ -33,16 +33,31 @@ h1, h2, .cinzel {
 .app {
   height: 100%;
   display: grid;
-  grid-template-rows: auto 148px 1fr 168px;
+  grid-template-rows: auto 1fr 168px;
   gap: 8px;
   padding: 8px;
   position: relative;
 }
 .app-3d { padding: 6px; }
 .stage { position: relative; min-height: 0; border: 1px solid var(--line); overflow: hidden; }
+aside.map-menu.atlas-menu {
+  left: 16px;
+  right: auto;
+  top: 72px;
+  width: min(560px, 78vw);
+  height: min(420px, 58vh);
+  z-index: 14;
+}
+aside.map-menu.atlas-menu .atlas-wrap {
+  flex: 1;
+  height: auto;
+  min-height: 280px;
+  border: none;
+}
+aside.map-menu.atlas-menu .atlas-label { display: none; }
 .atlas-wrap {
   position: relative; min-height: 0; border: 1px solid var(--line); overflow: hidden;
-  display: flex; flex-direction: column;
+  display: flex; flex-direction: column; flex: 1;
 }
 .atlas-label {
   position: absolute; left: 8px; top: 6px; z-index: 2;

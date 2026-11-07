@@ -1,10 +1,11 @@
 import { CHART, terrainAt } from "./map";
 
-/** Adjacent tiles differ by at most 1: peaks raise a slope, never a floating block. */
+const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+/** Adjacent land differs by at most 1. Water stays 0 and is never raised. */
 export function raiseConnect(grid: number[][], blocked?: (x: number, y: number) => boolean) {
   const h = grid.length;
   const w = grid[0]?.length || 0;
-  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   let changed = true;
   let guard = 0;
   while (changed && guard < w * h * 4) {
@@ -13,7 +14,7 @@ export function raiseConnect(grid: number[][], blocked?: (x: number, y: number) 
     for (let y = 0; y < h; y += 1) {
       for (let x = 0; x < w; x += 1) {
         if (blocked?.(x, y)) continue;
-        for (const [dx, dy] of dirs) {
+        for (const [dx, dy] of DIRS) {
           const nx = x + dx;
           const ny = y + dy;
           if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
@@ -26,6 +27,39 @@ export function raiseConnect(grid: number[][], blocked?: (x: number, y: number) 
       }
     }
   }
+  return grid;
+}
+
+function lowerConnect(grid: number[][], blocked?: (x: number, y: number) => boolean) {
+  const h = grid.length;
+  const w = grid[0]?.length || 0;
+  let changed = true;
+  let guard = 0;
+  while (changed && guard < w * h * 4) {
+    changed = false;
+    guard += 1;
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        if (blocked?.(x, y)) continue;
+        for (const [dx, dy] of DIRS) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          if (blocked?.(nx, ny)) continue;
+          if (grid[y][x] > grid[ny][nx] + 1) {
+            grid[y][x] = grid[ny][nx] + 1;
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+  return grid;
+}
+
+export function slopeConnect(grid: number[][], blocked?: (x: number, y: number) => boolean) {
+  raiseConnect(grid, blocked);
+  lowerConnect(grid, blocked);
   return grid;
 }
 
@@ -81,7 +115,12 @@ export function chartHeights(cx: number, cy: number): number[][] {
       else grid[y][x] = Math.min(grid[y][x], dist[y][x]);
     }
   }
-  raiseConnect(grid, sea);
+  slopeConnect(grid, sea);
+  for (let y = 0; y < CHART; y += 1) {
+    for (let x = 0; x < CHART; x += 1) {
+      if (sea(x, y)) grid[y][x] = 0;
+    }
+  }
   chartCache.set(key, grid);
   return grid;
 }

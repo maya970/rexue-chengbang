@@ -2,9 +2,13 @@
 
 export { raiseConnect } from "../engine/height";
 
-export const TW = 32;
-export const TH = 16;
-export const TZ = 12;
+export const TW = 40;
+export const TH = 20;
+export const TZ = 8;
+
+export function landDrop(elev: number, southElev: number) {
+  return Math.max(0.35, elev - southElev);
+}
 
 export function project(lx: number, ly: number, elev: number, ox: number, oy: number, scale: number) {
   return {
@@ -59,6 +63,64 @@ export function drawBlock(
   ctx.strokeStyle = "rgba(20,12,8,0.35)";
   ctx.lineWidth = Math.max(1, scale * 0.5);
   ctx.stroke();
+}
+
+export function textureIsoTop(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  scale: number,
+  img: CanvasImageSource,
+  stroke = true,
+) {
+  const tw = TW * scale;
+  const th = TH * scale;
+  const hw = tw / 2;
+  const hh = th / 2;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + hw, y + hh);
+  ctx.lineTo(x, y + th);
+  ctx.lineTo(x - hw, y + hh);
+  ctx.closePath();
+  ctx.clip();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, x - hw, y, tw, th);
+  ctx.restore();
+  if (!stroke) return;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + hw, y + hh);
+  ctx.lineTo(x, y + th);
+  ctx.lineTo(x - hw, y + hh);
+  ctx.closePath();
+  ctx.strokeStyle = "rgba(16,10,6,0.28)";
+  ctx.lineWidth = Math.max(1, scale * 0.45);
+  ctx.stroke();
+}
+
+export function drawFlatTop(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  scale: number,
+  img: CanvasImageSource,
+) {
+  textureIsoTop(ctx, x, y, scale, img);
+}
+
+export function drawIsoSprite(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  scale: number,
+  img: CanvasImageSource,
+  size = 16,
+) {
+  ctx.imageSmoothingEnabled = false;
+  const s = size * scale * 0.95;
+  ctx.drawImage(img, x - s / 2, y + (TH * scale) * 0.22 - s, s, s);
 }
 
 export function inBlock(px: number, py: number, x: number, y: number, scale: number, drop: number) {

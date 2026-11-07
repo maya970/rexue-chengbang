@@ -2,8 +2,8 @@ import { useEffect, useRef } from "react";
 import { BUILDINGS, CITY_H, CITY_W } from "../engine/catalog";
 import { cityHeightGrid, isCityRoad } from "../engine/plots";
 import type { BuildingId, Card, City, World } from "../types";
-import { blitCity, walkerTile } from "./cityPixel";
-import { drawBlock, inBlock, palette, project } from "./iso";
+import { blitCity, buildingTile, emptyTile, grassTile, roadTile, walkerTile } from "./cityPixel";
+import { drawBlock, drawIsoSprite, inBlock, landDrop, palette, project, textureIsoTop } from "./iso";
 
 const ROOF: Record<BuildingId, { top: string; left: string; right: string }> = {
   acropolis: { top: "#c83828", left: "#6a1818", right: "#8a2828" },
@@ -99,18 +99,24 @@ export function CityCanvas(props: {
         for (let lx = 0; lx < CITY_W; lx += 1) {
           const ly = sum - lx;
           if (ly < 0 || ly >= CITY_H) continue;
-          const elev = grid[ly][lx];
-          const se = ly + 1 < CITY_H ? grid[ly + 1][lx] : 0;
-          const drop = Math.max(1, elev - se + 1);
-          const p = project(lx, ly, elev, ox, oy, zoom);
-          const pal = isCityRoad(lx, ly) ? palette("road") : palette("plot");
-          drawBlock(ctx, p.x, p.y, zoom, drop, pal.top, pal.left, pal.right);
+          const elev = grid[ly]?.[lx] ?? 0;
+          const se = ly + 1 < CITY_H ? (grid[ly + 1]?.[lx] ?? 0) : 0;
+          const water = elev <= 0;
+          const p = project(lx, ly, water ? 0 : elev, ox, oy, zoom);
           const plot = plotAt(lx, ly);
+          const ground = isCityRoad(lx, ly) ? roadTile() : plot ? emptyTile(plot.kind) : grassTile();
+          if (water) {
+            textureIsoTop(ctx, p.x, p.y, zoom, ground);
+          } else {
+            const pal = isCityRoad(lx, ly) ? palette("road") : palette("plot");
+            drawBlock(ctx, p.x, p.y, zoom, landDrop(elev, se), pal.top, pal.left, pal.right);
+            textureIsoTop(ctx, p.x, p.y, zoom, ground);
+          }
           if (plot?.building) {
             const roof = ROOF[plot.building];
-            const roofH = 1 + Math.min(2, city.buildings[plot.building]?.level || 1);
-            const q = project(lx, ly, elev + roofH, ox, oy, zoom);
-            drawBlock(ctx, q.x, q.y, zoom, roofH, roof.top, roof.left, roof.right);
+            const q = project(lx, ly, elev + 1, ox, oy, zoom);
+            if (!water) drawBlock(ctx, q.x, q.y, zoom, 1, roof.top, roof.left, roof.right);
+            drawIsoSprite(ctx, p.x, p.y, zoom * 1.05, buildingTile(plot.building), 16);
           }
         }
       }
@@ -142,10 +148,10 @@ export function CityCanvas(props: {
         for (let lx = CITY_W - 1; lx >= 0; lx -= 1) {
           const ly = sum - lx;
           if (ly < 0 || ly >= CITY_H) continue;
-          const elev = grid[ly][lx];
-          const se = ly + 1 < CITY_H ? grid[ly + 1][lx] : 0;
-          const drop = Math.max(1, elev - se + 1);
-          const p = project(lx, ly, elev, ox, oy, zoom);
+          const elev = grid[ly]?.[lx] ?? 0;
+          const se = ly + 1 < CITY_H ? (grid[ly + 1]?.[lx] ?? 0) : 0;
+          const drop = elev <= 0 ? 0.25 : landDrop(elev, se);
+          const p = project(lx, ly, elev <= 0 ? 0 : elev, ox, oy, zoom);
           if (!inBlock(px, py, p.x, p.y, zoom, drop)) continue;
           const plot = (city.plots || []).find((pl) => pl.lx === lx && pl.ly === ly);
           if (!plot) return;
@@ -175,7 +181,7 @@ export function CityCanvas(props: {
   return (
     <div className="canvas-host city-canvas pixel-map" ref={host}>
       <div className="city-caption">
-        {props.city.name} · 45°立体俯视 · 空地同一地皮，高低连成缓坡 · {built}/{cap}
+        {props.city.name} · 像素城郭 · 水面无高度 · 空地缓坡连通 · {built}/{cap}
         {" · "}
         {BUILDINGS.acropolis.name}
         {" · "}点空地建造
