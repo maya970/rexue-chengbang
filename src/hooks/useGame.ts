@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { chartCenter, chartOf } from "../engine/map";
 import { foldHistory, playerCities, projectWorld } from "../engine/simulate";
 import { veilWorld } from "../engine/veil";
 import { loadChainState } from "../lib/chain";
@@ -21,8 +22,9 @@ export function useGame() {
   const [pairs, setPairs] = useState<MarketPair[]>([]);
   const [busy, setBusy] = useState("");
   const [now, setNow] = useState(Date.now());
-  const [view, setView] = useState({ x: 0, y: 0 });
-  const [selected, setSelected] = useState<{ x: number; y: number } | null>({ x: 0, y: 0 });
+  const [view, setView] = useState(() => chartCenter(0, 0));
+  const [chart, setChart] = useState({ cx: 0, cy: 0 });
+  const [selected, setSelected] = useState<{ x: number; y: number } | null>(() => chartCenter(0, 0));
   const [focusCityId, setFocusCityId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -72,9 +74,28 @@ export function useGame() {
     ? sim.cities[focusCityId]
     : myCities[0] || null;
 
+  const enterChart = useCallback((cx: number, cy: number, at?: { x: number; y: number }) => {
+    setChart({ cx, cy });
+    const mid = at || chartCenter(cx, cy);
+    setView(mid);
+    setSelected(mid);
+  }, []);
+
+  const goChart = useCallback((dcx: number, dcy: number) => {
+    setChart((cur) => {
+      const next = { cx: cur.cx + dcx, cy: cur.cy + dcy };
+      const mid = chartCenter(next.cx, next.cy);
+      setView(mid);
+      setSelected(mid);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     if (!focusCityId && myCities[0]) {
       setFocusCityId(myCities[0].id);
+      const c = chartOf(myCities[0].x, myCities[0].y);
+      setChart(c);
       setView({ x: myCities[0].x, y: myCities[0].y });
     }
   }, [focusCityId, myCities]);
@@ -188,6 +209,9 @@ export function useGame() {
     now,
     view,
     setView,
+    chart,
+    enterChart,
+    goChart,
     selected,
     setSelected,
     focusCityId,

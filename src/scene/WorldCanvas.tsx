@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { cityIdAt, npcAt, terrainAt } from "../engine/map";
+import { chartOrigin, CHART, cityIdAt, npcAt, terrainAt } from "../engine/map";
 import { posAt } from "../engine/path";
 import type { City, World } from "../types";
 import { blit, drawFeCursor, overlaySprite, terrainSprite, TILE } from "./feTiles";
@@ -18,6 +18,7 @@ function kindOf(c: City): "city" | "village" | "tribe" | "ship" {
 export function WorldCanvas(props: {
   world: World;
   now: number;
+  chart: { cx: number; cy: number };
   view: { x: number; y: number };
   selected: { x: number; y: number } | null;
   address: string;
@@ -81,7 +82,7 @@ export function WorldCanvas(props: {
     }
 
     function draw() {
-      const { view, selected, world, now, address } = latest.current;
+      const { view, selected, world, now, address, chart } = latest.current;
       const { cssW, cssH } = viewSize();
       const s = tilePx();
       const frame = Math.floor(now / 380) % 2;
@@ -94,15 +95,17 @@ export function WorldCanvas(props: {
       const shiftY = Math.round((startY - oy) * s);
       const cols = Math.ceil(cssW / s) + 2;
       const rows = Math.ceil(cssH / s) + 2;
+      const origin = chartOrigin(chart.cx, chart.cy);
 
       ctx.imageSmoothingEnabled = false;
-      ctx.fillStyle = "#0e4068";
+      ctx.fillStyle = "#082438";
       ctx.fillRect(0, 0, cssW, cssH);
 
       for (let j = 0; j < rows; j += 1) {
         for (let k = 0; k < cols; k += 1) {
           const tx = startX + k;
           const ty = startY + j;
+          if (tx < origin.x || ty < origin.y || tx >= origin.x + CHART || ty >= origin.y + CHART) continue;
           const t = terrainAt(tx, ty);
           const spr = terrainSprite(t, tx, ty, frame);
           blit(ctx, spr, k * s + shiftX, j * s + shiftY, zoom);
@@ -118,6 +121,7 @@ export function WorldCanvas(props: {
       }
 
       for (const c of Object.values(world.cities)) {
+        if (c.x < origin.x || c.y < origin.y || c.x >= origin.x + CHART || c.y >= origin.y + CHART) continue;
         const px = Math.round((c.x - ox) * s);
         const py = Math.round((c.y - oy) * s);
         if (px < -s || py < -s || px > cssW || py > cssH) continue;
@@ -161,8 +165,9 @@ export function WorldCanvas(props: {
       lastY = ev.clientY;
       moved += Math.abs(dx) + Math.abs(dy);
       const s = tilePx();
-      const nx = latest.current.view.x - dx / s;
-      const ny = latest.current.view.y - dy / s;
+      const origin = chartOrigin(latest.current.chart.cx, latest.current.chart.cy);
+      const nx = Math.min(origin.x + CHART - 2, Math.max(origin.x + 1, latest.current.view.x - dx / s));
+      const ny = Math.min(origin.y + CHART - 2, Math.max(origin.y + 1, latest.current.view.y - dy / s));
       latest.current.onView(nx, ny);
       latest.current = { ...latest.current, view: { x: nx, y: ny } };
     }
@@ -206,7 +211,7 @@ export function WorldCanvas(props: {
     latest.current = props;
   });
 
-  return <div className="canvas-host pixel-map" ref={host} title="像素大地图。拖动平移，滚轮缩放，双击进城" />;
+  return <div className="canvas-host pixel-map" ref={host} title="本张大地图外圈是海。拖动只在本图内，邻图用上下左右或超大地图进入" />;
 }
 
 export function tileHint(x: number, y: number) {

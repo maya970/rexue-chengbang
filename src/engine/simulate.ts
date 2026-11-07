@@ -2,7 +2,7 @@ import { berthOf, byIds, mintCard, slowest, uniqueId } from "./cards";
 import { AR_FEE_ADDR, BUILDINGS, COLONIZE_COST, MISSION_NAME, ROLES, scaleTime, splitWinston, SUPPLY_PER_SLAVE } from "./catalog";
 import { citizensOf, garrisonPeople, garrisonShips, recruitCapOf, recruitableCount, worksOf } from "./citymath";
 import { resolveFight } from "./combat";
-import { canFound, cityIdAt, isCoast, npcAt, npcPower, respawnMs, terrainAt } from "./map";
+import { canFound, chartOf, CHART, cityIdAt, isCoast, npcAt, npcPower, respawnMs, terrainAt } from "./map";
 import { marchSeconds, planPath, posAt, timeAtIndex } from "./path";
 import { ensureCityPlots, findPlotFor, occupyPlot, plotTimeMult, seedCityPlots } from "./plots";
 import { buildMultAt, empireTimeFactor, frontageAt, slaveCostFor, workersFor } from "./site";
@@ -86,12 +86,19 @@ function makeNpcCity(world: World, x: number, y: number, garrison = false) {
   if (garrison) fillNpcGarrison(world, world.cities[id]);
 }
 
-function ensureNpcsNear(world: World, cx: number, cy: number, radius = 28) {
-  for (let y = cy - radius; y <= cy + radius; y += 1) {
-    for (let x = cx - radius; x <= cx + radius; x += 1) {
+function ensureNpcsInChart(world: World, cx: number, cy: number) {
+  const ox = cx * CHART;
+  const oy = cy * CHART;
+  for (let y = oy; y < oy + CHART; y += 1) {
+    for (let x = ox; x < ox + CHART; x += 1) {
       makeNpcCity(world, x, y);
     }
   }
+}
+
+function ensureNpcsNear(world: World, x: number, y: number) {
+  const c = chartOf(x, y);
+  ensureNpcsInChart(world, c.cx, c.cy);
 }
 
 function finishJobs(world: World, city: City, t: number) {
@@ -542,7 +549,7 @@ function spawnNpcRaids(world: World, from: number, t: number) {
     const target = nearestPlayerCity(world, origin.x, origin.y);
     if (!target) continue;
     const dist = Math.hypot(origin.x - target.x, origin.y - target.y);
-    if (dist > 11) continue;
+    if (dist > 18) continue;
     if (start < target.foundedAt + 240000) continue;
     if (incomingNpcCount(world, target.x, target.y) >= 2) continue;
     const crew = garrisonPeople(world, origin.id).sort((a, b) => a.id.localeCompare(b.id));
@@ -596,7 +603,7 @@ function respawnTribes(world: World, t: number) {
 function seedTribesAroundPlayers(world: World) {
   for (const c of Object.values(world.cities)) {
     if (c.npc) continue;
-    ensureNpcsNear(world, c.x, c.y, 22);
+    ensureNpcsNear(world, c.x, c.y);
   }
 }
 
@@ -1018,7 +1025,7 @@ export function syncTime(now: number, simAt: number) {
 /** Project folded history to wall-clock / camera. One tick, no second replay. */
 export function projectWorld(folded: World, now: number, viewX = 0, viewY = 0): World {
   const world = cloneWorld(folded);
-  ensureNpcsNear(world, viewX, viewY, 18);
+  ensureNpcsNear(world, viewX, viewY);
   seedTribesAroundPlayers(world);
   tickWorld(world, syncTime(now, folded.simAt || 0));
   return world;

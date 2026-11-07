@@ -15,14 +15,83 @@ export function rand01(x: number, y: number, salt = 0): number {
   return hashXY(x, y, WORLD_SEED + salt) / 4294967296;
 }
 
+/** 一张大地图边长。外圈固定是海，内部 1～2 座孤岛。 */
+export const CHART = 40;
+export const CHART_SEA = 5;
+
+export function chartOf(x: number, y: number) {
+  return { cx: Math.floor(x / CHART), cy: Math.floor(y / CHART) };
+}
+
+export function chartOrigin(cx: number, cy: number) {
+  return { x: cx * CHART, y: cy * CHART };
+}
+
+export function chartCenter(cx: number, cy: number) {
+  return { x: cx * CHART + (CHART - 1) / 2, y: cy * CHART + (CHART - 1) / 2 };
+}
+
+export function islandCount(cx: number, cy: number): 1 | 2 {
+  return hashXY(cx, cy, 17) % 5 < 2 ? 2 : 1;
+}
+
+const CHART_A = ["银沙", "黑潮", "琥珀", "雾角", "双月", "赤礁", "苍风", "铜铃", "象牙", "残阳", "青岚", "白帆"];
+const CHART_B = ["海图", "屿图", "礁图", "湾图"];
+
+export function chartName(cx: number, cy: number) {
+  const a = CHART_A[hashXY(cx, cy, 21) % CHART_A.length];
+  const b = CHART_B[hashXY(cx, cy, 22) % CHART_B.length];
+  return `${a}${b}·${islandCount(cx, cy) === 2 ? "双屿" : "孤岛"}`;
+}
+
+function islandCenters(cx: number, cy: number) {
+  const inner = CHART - CHART_SEA * 2;
+  const n = islandCount(cx, cy);
+  if (n === 1) {
+    const jx = (hashXY(cx, cy, 31) % 1000) / 1000;
+    const jy = (hashXY(cx, cy, 32) % 1000) / 1000;
+    return [{
+      x: CHART_SEA + inner * (0.28 + jx * 0.44),
+      y: CHART_SEA + inner * (0.28 + jy * 0.44),
+      r: inner * (0.28 + (hashXY(cx, cy, 33) % 80) / 400),
+    }];
+  }
+  const split = hashXY(cx, cy, 34) % 2 === 0;
+  const j = (hashXY(cx, cy, 35) % 80) / 400;
+  if (split) {
+    return [
+      { x: CHART_SEA + inner * (0.28 + j), y: CHART_SEA + inner * 0.38, r: inner * 0.22 },
+      { x: CHART_SEA + inner * (0.72 - j), y: CHART_SEA + inner * 0.62, r: inner * 0.22 },
+    ];
+  }
+  return [
+    { x: CHART_SEA + inner * 0.4, y: CHART_SEA + inner * (0.26 + j), r: inner * 0.21 },
+    { x: CHART_SEA + inner * 0.62, y: CHART_SEA + inner * (0.74 - j), r: inner * 0.21 },
+  ];
+}
+
+export function landAt(x: number, y: number): boolean {
+  const { cx, cy } = chartOf(x, y);
+  const lx = x - cx * CHART;
+  const ly = y - cy * CHART;
+  if (lx < CHART_SEA || ly < CHART_SEA || lx >= CHART - CHART_SEA || ly >= CHART - CHART_SEA) return false;
+  const n = rand01(x, y, 4);
+  for (const c of islandCenters(cx, cy)) {
+    const dx = (lx - c.x) / c.r;
+    const dy = (ly - c.y) / (c.r * 0.9);
+    if (dx * dx + dy * dy < 1 - n * 0.2) return true;
+  }
+  return false;
+}
+
 export function terrainAt(x: number, y: number): Terrain {
+  if (!landAt(x, y)) return "sea";
+  const wet =
+    !landAt(x + 1, y) || !landAt(x - 1, y) || !landAt(x, y + 1) || !landAt(x, y - 1);
+  if (wet) return "coast";
   const n = rand01(x, y, 1);
-  const ridge = Math.sin((y + n * 3) / 14) * 0.33 + Math.sin((x - y) / 36) * 0.16;
-  const v = n * 0.7 + (ridge + 0.33);
-  if (v < 0.46) return "sea";
-  if (v < 0.54) return "coast";
-  if (v > 0.92) return "mountain";
-  if (v > 0.78) return "forest";
+  if (n > 0.86) return "mountain";
+  if (n > 0.64) return "forest";
   return "plain";
 }
 

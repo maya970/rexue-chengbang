@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { BUILDINGS, COLONIZE_COST, MISSION_NAME, PLOT_NAME, PLOT_TIME, ROLES, scaleTime, SUPPLY_PER_SLAVE } from "./engine/catalog";
-import { cityIdAt, npcAt, terrainAt, tileName } from "./engine/map";
+import { chartName, chartOf, cityIdAt, npcAt, terrainAt, tileName } from "./engine/map";
 import { planPath } from "./engine/path";
 import { canBuildOn, plotTimeMult } from "./engine/plots";
 import { empireTimeFactor, slaveCostFor, workersFor } from "./engine/site";
@@ -9,6 +9,7 @@ import { useGame } from "./hooks/useGame";
 import { makeCommand, statusLabel } from "./lib/cmd";
 import { arToWinston, winstonToAr } from "./lib/market";
 import { shortAddr } from "./lib/wallet";
+import { AtlasCanvas } from "./scene/AtlasCanvas";
 import { CityCanvas } from "./scene/CityCanvas";
 import { WorldCanvas } from "./scene/WorldCanvas";
 import type { BuildingId, MarchMission, RoleId } from "./types";
@@ -97,8 +98,8 @@ export function App() {
     if (!c || c.owner !== g.address) return;
     g.setFocusCityId(c.id);
     setFromCityId(c.id);
-    g.setView({ x: c.x, y: c.y });
-    g.setSelected({ x: c.x, y: c.y });
+    const ch = chartOf(c.x, c.y);
+    g.enterChart(ch.cx, ch.cy, { x: c.x, y: c.y });
     setInside(enter);
     setModal("none");
     setRosterOpen(false);
@@ -110,8 +111,8 @@ export function App() {
     const home = sim.cities[card.cityId];
     if (home && home.owner === g.address) {
       g.setFocusCityId(home.id);
-      g.setView({ x: home.x, y: home.y });
-      g.setSelected({ x: home.x, y: home.y });
+      const ch = chartOf(home.x, home.y);
+      g.enterChart(ch.cx, ch.cy, { x: home.x, y: home.y });
     }
     setCardId(card.id);
     setInside(false);
@@ -181,6 +182,12 @@ export function App() {
         </div>
       </header>
 
+      <AtlasCanvas
+        chart={g.chart}
+        cities={Object.values(sim.cities).map((c) => ({ x: c.x, y: c.y, mine: c.owner === g.address }))}
+        onEnter={(cx, cy) => { g.enterChart(cx, cy); setInside(false); setRosterOpen(false); }}
+      />
+
       <div className="stage">
         {inside && city && mine ? (
           <CityCanvas
@@ -195,6 +202,7 @@ export function App() {
           <WorldCanvas
             world={g.world}
             now={g.now}
+            chart={g.chart}
             view={g.view}
             selected={g.selected}
             address={g.address}
@@ -203,6 +211,15 @@ export function App() {
             onEnterCity={enterOwnCity}
           />
         )}
+        {!inside ? (
+          <div className="chart-pad">
+            <span className="muted">{chartName(g.chart.cx, g.chart.cy)}</span>
+            <button className="btn tiny" onClick={() => g.goChart(0, -1)}>北</button>
+            <button className="btn tiny" onClick={() => g.goChart(0, 1)}>南</button>
+            <button className="btn tiny" onClick={() => g.goChart(-1, 0)}>西</button>
+            <button className="btn tiny" onClick={() => g.goChart(1, 0)}>东</button>
+          </div>
+        ) : null}
       </div>
 
       {rosterOpen ? (
@@ -272,7 +289,11 @@ export function App() {
               ) : null}
               {rosterTab === "marches" ? (
                 myMarches.length ? myMarches.map((m) => (
-                  <div className="card" key={m.id} onClick={() => { g.setView({ x: m.toX, y: m.toY }); g.setSelected({ x: m.toX, y: m.toY }); setRosterOpen(false); }}>
+                  <div className="card" key={m.id} onClick={() => {
+                    const ch = chartOf(m.toX, m.toY);
+                    g.enterChart(ch.cx, ch.cy, { x: m.toX, y: m.toY });
+                    setRosterOpen(false);
+                  }}>
                     <div>{MISSION_NAME[m.mission]}<small>去 ({m.toX},{m.toY}) · {m.personIds.length} 人</small></div>
                     <button className="btn tiny">查找</button>
                   </div>
