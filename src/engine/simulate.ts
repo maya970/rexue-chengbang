@@ -5,12 +5,27 @@ import { resolveFight } from "./combat";
 import { canFound, chartOf, CHART, cityIdAt, isCoast, npcAt, npcPower, respawnMs, terrainAt } from "./map";
 import { marchSeconds, planPath, posAt, timeAtIndex } from "./path";
 import { ensureCityPlots, findPlotFor, occupyPlot, plotTimeMult, seedCityPlots } from "./plots";
+import {
+  adjacentClaimed,
+  alliesOf,
+  claimTile,
+  claimsGap,
+  createGuild,
+  ensureGuildState,
+  ensureSystemNear,
+  joinGuild,
+  leaveGuild,
+} from "./realm";
 import { buildMultAt, empireTimeFactor, frontageAt, slaveCostFor, workersFor } from "./site";
 import { u32 } from "./hash";
 import type { BattleReport, BuildingId, Campaign, Card, City, Command, March, MarketPair, RoleId, Squad, TrackedBatch, TxProof, World, WorldCheckpoint } from "../types";
 
 function emptyWorld(): World {
-  return { cities: {}, cards: {}, squads: {}, marches: {}, listings: {}, reports: [], skipped: [], resolvedClash: {}, gone: {}, raidDone: {}, spentPays: {}, simAt: 0, digest: "" };
+  return {
+    cities: {}, cards: {}, squads: {}, marches: {}, listings: {}, reports: [], skipped: [],
+    resolvedClash: {}, gone: {}, raidDone: {}, spentPays: {}, claims: {}, guilds: {}, memberOf: {},
+    guildBanUntil: {}, simAt: 0, digest: "",
+  };
 }
 
 function cloneWorld(w: World): World {
@@ -28,11 +43,12 @@ function markWar(city: City | undefined, war: Campaign) {
 function fillNpcGarrison(world: World, city: City) {
   if (Object.values(world.cards).some((c) => c.cityId === city.id)) return;
   const site = npcAt(city.x, city.y);
-  if (!site) return;
-  const p = npcPower(site);
-  const n = Math.max(4, Math.min(14, Math.floor(2 + site.level * 1.2)));
+  if (!site && !city.systemRank) return;
+  const level = site?.level || city.tribeLevel || 4;
+  const p = site ? npcPower(site) : 20 + level * 10;
+  const n = Math.max(4, Math.min(22, Math.floor(2 + level * 1.2)));
   const roles: RoleId[] =
-    site.kind === "pirates" ? ["epibatai", "trierarch", "trireme", "transport"] : ["hoplite", "peltast", "toxotes", "slave"];
+    site?.kind === "pirates" ? ["epibatai", "trierarch", "trireme", "transport"] : ["hoplite", "peltast", "toxotes", "slave"];
   for (let i = 0; i < n; i += 1) {
     const role = roles[i % roles.length];
     const card = mintCard({
@@ -43,9 +59,9 @@ function fillNpcGarrison(world: World, city: City) {
       bornAt: 0,
       bornTx: "npc",
     });
-    const wars = site.level + (p % 3);
+    const wars = level + (p % 3);
     for (let w = 0; w < wars; w += 1) {
-      card.campaigns.push({ id: `npcwar:${city.id}:${w}`, name: `${site.level}级边衅`, time: 0 });
+      card.campaigns.push({ id: `npcwar:${city.id}:${w}`, name: `${level}级边衅`, time: 0 });
     }
     world.cards[card.id] = card;
   }
@@ -55,6 +71,10 @@ function makeNpcCity(world: World, x: number, y: number, garrison = false) {
   const site = npcAt(x, y);
   if (!site) return;
   const id = cityIdAt(x, y);
+  if (world.cities[id]?.systemRank) {
+    if (garrison) fillNpcGarrison(world, world.cities[id]);
+    return;
+  }
   const gone = world.gone[id];
   if (gone && gone.respawnAt > (world.simAt || 0) && !world.cities[id]) return;
   if (gone) delete world.gone[id];
@@ -239,11 +259,12 @@ function mintSupply(world: World, n: number, owner: string, cityId: string, t: n
 }
 
 function corridorBlocked(world: World, tiles: { x: number; y: number }[], owner: string, destX: number, destY: number): string | null {
+  const friends = alliesOf(world, owner);
   for (let i = 1; i < tiles.length; i += 1) {
     const p = tiles[i];
     if (p.x === destX && p.y === destY) continue;
     const c = cityAt(world, p.x, p.y);
-    if (c && c.owner !== owner) return `须先清空连通地块 (${p.x},${p.y}) ${c.name}`;
+    if (c && !friends.has(c.owner)) return `须先清空连通地块 (${p.x},${p.y}) ${c.name}`;
   }
   return null;
 }
@@ -339,7 +360,17 @@ function applyAftermath(world: World, march: March, dest: City, t: number, soldi
     world.reports[0].supplies = supplies;
     world.reports[0].aftermath = "plunder";
     world.reports[0].rounds.push({ title: "劫掠", text: `带走奴隶卡 ${slaves}、物资卡 ${supplies}。因兵民悬殊，只毁去 ${hurt} 级建筑。城未易主。` });
+    claimTile(world, march.owner, dest.x, dest.y);
     returnHome(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), origin?.id);
+    return;
+  }
+  if (march.mission === "occupy") {
+    dest.owner = march.owner;
+    dest.npc = false;
+    parkAt(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), dest);
+    claimTile(world, march.owner, dest.x, dest.y);
+    world.reports[0].aftermath = "occupy";
+    world.reports[0].rounds.push({ title: "占领", text: `${dest.name} 易主。系统城不能毁灭，可占领、劫掠、屠城。` });
     return;
   }
   if (march.mission === "massacre") {
@@ -353,9 +384,19 @@ function applyAftermath(world: World, march: March, dest: City, t: number, soldi
     world.reports[0].supplies = supplies;
     world.reports[0].aftermath = "massacre";
     world.reports[0].rounds.push({ title: "屠城", text: `城易主。毁建筑 ${hurt} 级，得奴隶卡 ${slaves}、物资卡 ${supplies}。兵少则毁不了太多。` });
+    claimTile(world, march.owner, dest.x, dest.y);
     return;
   }
   if (march.mission === "destroy") {
+    if (dest.systemRank) {
+      dest.owner = march.owner;
+      dest.npc = false;
+      parkAt(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), dest);
+      claimTile(world, march.owner, dest.x, dest.y);
+      world.reports[0].aftermath = "occupy";
+      world.reports[0].rounds.push({ title: "不能毁灭", text: `${dest.name} 是系统城，已改为占领。` });
+      return;
+    }
     const slaves = mintSlaves(world, Math.max(1, Math.floor(works * 0.14)), march.owner, origin?.id || dest.id, t, seed);
     const supplies = mintSupply(world, Math.max(1, Math.floor(works * 0.12)), march.owner, origin?.id || dest.id, t, seed + "g");
     world.reports[0].slaves = slaves;
@@ -374,6 +415,9 @@ function resolveArrival(world: World, march: March, t: number) {
   const still = [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]);
 
   if (march.mission === "scout") {
+    if (!dest && adjacentClaimed(world, march.owner, march.toX, march.toY)) {
+      claimTile(world, march.owner, march.toX, march.toY);
+    }
     const report: BattleReport = {
       id: `scout:${march.id}`,
       time: t,
@@ -390,7 +434,9 @@ function resolveArrival(world: World, march: March, t: number) {
           title: "斥候",
           text: dest
             ? `城墙履历 ${dest.wars.length} 场。公民约 ${citizensOf(dest, world)}，名册 ${garrisonPeople(world, dest.id).length}，舰只 ${garrisonShips(world, dest.id).length}，宽度 ${dest.frontage}。`
-            : "目标地无城，可开辟殖民市。",
+            : adjacentClaimed(world, march.owner, march.toX, march.toY)
+              ? "目标地无城。连通已打通，可开辟殖民市。"
+              : "目标地无城。第二座城必须先把连通格子打下来。",
         },
       ],
       deadNames: [],
@@ -431,6 +477,7 @@ function resolveArrival(world: World, march: March, t: number) {
     };
     world.cities[city.id] = city;
     seedCityPlots(city, ["acropolis", "oikos"]);
+    claimTile(world, march.owner, city.x, city.y);
     parkAt(world, still, city);
     world.reports.unshift({
       id: `col:${march.id}`,
@@ -465,7 +512,7 @@ function resolveArrival(world: World, march: March, t: number) {
 
   const fight = fightMarch(world, march, t, dest, false);
   const soldiers = still.filter((id) => world.cards[id] && world.cards[id].kind !== "ship").length;
-  if (fight.report.win && (march.mission === "plunder" || march.mission === "massacre" || march.mission === "destroy")) {
+  if (fight.report.win && (march.mission === "plunder" || march.mission === "massacre" || march.mission === "destroy" || march.mission === "occupy")) {
     if (world.cities[dest.id]) applyAftermath(world, march, dest, t, soldiers);
   } else {
     returnHome(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), origin?.id);
@@ -604,6 +651,7 @@ function seedTribesAroundPlayers(world: World) {
   for (const c of Object.values(world.cities)) {
     if (c.npc) continue;
     ensureNpcsNear(world, c.x, c.y);
+    ensureSystemNear(world, c.x, c.y);
   }
 }
 
@@ -673,6 +721,7 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     };
     world.cities[city.id] = city;
     seedCityPlots(city, ["acropolis", "oikos", "agora", "barracks"]);
+    claimTile(world, owner, city.x, city.y);
     (["hoplite", "peltast"] as RoleId[]).forEach((role, i) => {
       const card = mintCard({
         id: uniqueId([batchKey, cmd.id, role, String(i)]),
@@ -817,6 +866,14 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
       const blocked = corridorBlocked(world, path.tiles, owner, cmd.toX!, cmd.toY!);
       if (blocked) return skip(world, cmd, blocked);
     }
+    if (cmd.mission === "colonize") {
+      const gap = claimsGap(world, owner, path.tiles, cmd.toX!, cmd.toY!);
+      if (gap) return skip(world, cmd, gap);
+    }
+    const destCity = cityAt(world, cmd.toX!, cmd.toY!);
+    if (cmd.mission === "destroy" && destCity?.systemRank) {
+      return skip(world, cmd, "系统城不能毁灭，请改占领、劫掠或屠城");
+    }
     if (path.naval) {
       if ((city.buildings.harbor?.level || 0) < 1) return skip(world, cmd, "出海必须有港口");
       if (!ships.some((s) => s.role === "transport")) return skip(world, cmd, "过海必须有运输船");
@@ -910,6 +967,21 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     if (reason) return skip(world, cmd, reason);
     return;
   }
+
+  if (cmd.kind === "create_guild") {
+    const err = createGuild(world, owner, cmd.name || "无名公会", t, uniqueId([batchKey, cmd.id, "guild"]));
+    if (err) return skip(world, cmd, err);
+    return;
+  }
+  if (cmd.kind === "join_guild") {
+    const err = joinGuild(world, owner, cmd.guildId || "", t);
+    if (err) return skip(world, cmd, err);
+    return;
+  }
+  if (cmd.kind === "leave_guild") {
+    const err = leaveGuild(world, owner, t);
+    if (err) return skip(world, cmd, err);
+  }
 }
 
 function settleSale(
@@ -992,6 +1064,7 @@ export function foldHistory(batches: TrackedBatch[], checkpoint?: WorldCheckpoin
   if (!world.gone) world.gone = {};
   if (!world.listings) world.listings = {};
   if (!world.spentPays) world.spentPays = {};
+  ensureGuildState(world);
   for (const [k, v] of Object.entries(world.gone as Record<string, unknown>)) {
     if (!v || typeof v !== "object") {
       world.gone[k] = { at: 0, respawnAt: Number.MAX_SAFE_INTEGER, level: 1 };
@@ -1026,6 +1099,7 @@ export function syncTime(now: number, simAt: number) {
 export function projectWorld(folded: World, now: number, viewX = 0, viewY = 0): World {
   const world = cloneWorld(folded);
   ensureNpcsNear(world, viewX, viewY);
+  ensureSystemNear(world, viewX, viewY);
   seedTribesAroundPlayers(world);
   tickWorld(world, syncTime(now, folded.simAt || 0));
   return world;
@@ -1047,3 +1121,4 @@ export function playerCities(world: World, owner: string): City[] {
 
 export { citizensOf, recruitCapOf, worksOf, garrisonPeople, garrisonShips, MISSION_NAME };
 export { idleSupply, idleSlaves, idleWorkers, corridorBlocked };
+export { claimsGap, isClaimed, adjacentClaimed, alliesOf } from "./realm";

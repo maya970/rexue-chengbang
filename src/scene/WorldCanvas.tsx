@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
+import { chartHeights } from "../engine/height";
 import { chartOrigin, CHART, cityIdAt, npcAt, terrainAt } from "../engine/map";
 import { posAt } from "../engine/path";
 import type { City, World } from "../types";
-import { blit, drawFeCursor, overlaySprite, terrainSprite, TILE } from "./feTiles";
+import { drawBlock, inBlock, palette, project, TH, TW } from "./iso";
 
 function kindOf(c: City): "city" | "village" | "tribe" | "ship" {
   if (c.npc) {
@@ -14,6 +15,13 @@ function kindOf(c: City): "city" | "village" | "tribe" | "ship" {
   const lv = (c.buildings.acropolis?.level || 0) + (c.buildings.oikos?.level || 0);
   return lv <= 3 ? "village" : "city";
 }
+
+const MARK = {
+  city: { top: "#c83828", left: "#6a1818", right: "#8a2828" },
+  village: { top: "#c06048", left: "#6a3020", right: "#8a4430" },
+  tribe: { top: "#8a6840", left: "#4a3020", right: "#6a4830" },
+  ship: { top: "#4a90b8", left: "#204858", right: "#306878" },
+};
 
 export function WorldCanvas(props: {
   world: World;
@@ -45,16 +53,12 @@ export function WorldCanvas(props: {
     const ctx = gfx;
     ctx.imageSmoothingEnabled = false;
 
-    let zoom = 3;
+    let zoomAdd = 0;
     let dragging = false;
     let moved = 0;
     let lastX = 0;
     let lastY = 0;
     let raf = 0;
-
-    function tilePx() {
-      return TILE * zoom;
-    }
 
     function resize() {
       const box = host.current;
@@ -72,74 +76,115 @@ export function WorldCanvas(props: {
       return { cssW: canvas.width / dpr, cssH: canvas.height / dpr };
     }
 
-    function tileAt(px: number, py: number) {
-      const { view } = latest.current;
+    function zoomOf() {
       const { cssW, cssH } = viewSize();
-      const s = tilePx();
-      const ox = view.x - cssW / s / 2;
-      const oy = view.y - cssH / s / 2;
-      return { x: Math.floor(ox + px / s), y: Math.floor(oy + py / s) };
+      const fit = Math.min(cssW / (CHART * TW * 0.95), cssH / (CHART * TH * 1.2 + 70));
+      return Math.max(0.7, Math.min(2.2, fit + zoomAdd));
+    }
+
+    function originOf() {
+      return chartOrigin(latest.current.chart.cx, latest.current.chart.cy);
+    }
+
+    function cam() {
+      const { view, chart } = latest.current;
+      const { cssW, cssH } = viewSize();
+      const zoom = zoomOf();
+      const origin = chartOrigin(chart.cx, chart.cy);
+      const grid = chartHeights(chart.cx, chart.cy);
+      const lx = view.x - origin.x;
+      const ly = view.y - origin.y;
+      const elev = grid[Math.max(0, Math.min(CHART - 1, Math.floor(ly)))]?.[Math.max(0, Math.min(CHART - 1, Math.floor(lx)))] || 0;
+      const mid = project(lx, ly, elev, 0, 0, zoom);
+      return { cssW, cssH, zoom, ox: cssW / 2 - mid.x, oy: cssH * 0.42 - mid.y, origin, grid };
+    }
+
+    function tileAt(px: number, py: number) {
+      const { ox, oy, origin, grid, zoom } = cam();
+      for (let sum = CHART * 2; sum >= 0; sum -= 1) {
+        for (let lx = CHART - 1; lx >= 0; lx -= 1) {
+          const ly = sum - lx;
+          if (ly < 0 || ly >= CHART) continue;
+          const elev = grid[ly][lx];
+          const se = ly + 1 < CHART ? grid[ly + 1][lx] : 0;
+          const drop = Math.max(1, elev - se + 1);
+          const p = project(lx, ly, elev, ox, oy, zoom);
+          if (inBlock(px, py, p.x, p.y, zoom, drop)) return { x: origin.x + lx, y: origin.y + ly };
+        }
+      }
+      return origin;
     }
 
     function draw() {
-      const { view, selected, world, now, address, chart } = latest.current;
-      const { cssW, cssH } = viewSize();
-      const s = tilePx();
+      const { selected, world, now, address } = latest.current;
+      const { cssW, cssH, ox, oy, origin, grid, zoom } = cam();
       const frame = Math.floor(now / 380) % 2;
       const walk = Math.floor(now / 220) % 2;
-      const ox = view.x - cssW / s / 2;
-      const oy = view.y - cssH / s / 2;
-      const startX = Math.floor(ox);
-      const startY = Math.floor(oy);
-      const shiftX = Math.round((startX - ox) * s);
-      const shiftY = Math.round((startY - oy) * s);
-      const cols = Math.ceil(cssW / s) + 2;
-      const rows = Math.ceil(cssH / s) + 2;
-      const origin = chartOrigin(chart.cx, chart.cy);
-
       ctx.imageSmoothingEnabled = false;
-      ctx.fillStyle = "#082438";
+      ctx.fillStyle = "#071820";
       ctx.fillRect(0, 0, cssW, cssH);
 
-      for (let j = 0; j < rows; j += 1) {
-        for (let k = 0; k < cols; k += 1) {
-          const tx = startX + k;
-          const ty = startY + j;
-          if (tx < origin.x || ty < origin.y || tx >= origin.x + CHART || ty >= origin.y + CHART) continue;
+      for (let sum = 0; sum <= CHART * 2; sum += 1) {
+        for (let lx = 0; lx < CHART; lx += 1) {
+          const ly = sum - lx;
+          if (ly < 0 || ly >= CHART) continue;
+          const tx = origin.x + lx;
+          const ty = origin.y + ly;
           const t = terrainAt(tx, ty);
-          const spr = terrainSprite(t, tx, ty, frame);
-          blit(ctx, spr, k * s + shiftX, j * s + shiftY, zoom);
+          const elev = grid[ly][lx];
+          const se = ly + 1 < CHART ? grid[ly + 1][lx] : 0;
+          const drop = t === "sea" ? 1 : Math.max(1, elev - se + 1);
+          const p = project(lx, ly, elev, ox, oy, zoom);
+          const pal = palette(t, frame);
+          drawBlock(ctx, p.x, p.y, zoom, drop, pal.top, pal.left, pal.right);
+          if (t === "forest" && elev > 0) {
+            const q = project(lx, ly, elev + 1, ox, oy, zoom);
+            drawBlock(ctx, q.x, q.y, zoom, 1, "#3e8a48", "#1c4a24", "#2e6a34");
+          }
+          if (t === "mountain" && elev > 2) {
+            const q = project(lx, ly, elev + 1, ox, oy, zoom);
+            drawBlock(ctx, q.x, q.y, zoom, 1, "#e8e0d4", "#6a6058", "#8a8078");
+          }
         }
-      }
-
-      ctx.fillStyle = "rgba(16, 24, 12, 0.18)";
-      for (let j = 0; j < rows; j += 1) {
-        ctx.fillRect(0, j * s + shiftY, cssW, 1);
-      }
-      for (let k = 0; k < cols; k += 1) {
-        ctx.fillRect(k * s + shiftX, 0, 1, cssH);
       }
 
       for (const c of Object.values(world.cities)) {
         if (c.x < origin.x || c.y < origin.y || c.x >= origin.x + CHART || c.y >= origin.y + CHART) continue;
-        const px = Math.round((c.x - ox) * s);
-        const py = Math.round((c.y - oy) * s);
-        if (px < -s || py < -s || px > cssW || py > cssH) continue;
-        blit(ctx, overlaySprite(kindOf(c)), px, py, zoom);
-        if (c.owner === address) blit(ctx, overlaySprite("flag"), px, py, zoom);
+        const lx = c.x - origin.x;
+        const ly = c.y - origin.y;
+        const elev = grid[ly][lx];
+        const mark = MARK[kindOf(c)];
+        const q = project(lx, ly, elev + 2, ox, oy, zoom);
+        drawBlock(ctx, q.x, q.y, zoom, 2, mark.top, mark.left, mark.right);
+        if (c.owner === address) {
+          ctx.fillStyle = "#f0c040";
+          ctx.fillRect(q.x - zoom, q.y - 3 * zoom, 2 * zoom, 3 * zoom);
+        }
       }
 
       for (const m of Object.values(world.marches)) {
-        const p = posAt(m.path, m.startAt, m.arriveAt, now);
-        const px = Math.round((p.x - ox) * s);
-        const py = Math.round((p.y - oy) * s) - walk;
-        blit(ctx, overlaySprite("army", walk), px, py, zoom);
+        const pos = posAt(m.path, m.startAt, m.arriveAt, now);
+        if (pos.x < origin.x || pos.y < origin.y || pos.x >= origin.x + CHART || pos.y >= origin.y + CHART) continue;
+        const lx = pos.x - origin.x;
+        const ly = pos.y - origin.y;
+        const elev = grid[Math.floor(ly)]?.[Math.floor(lx)] || 0;
+        const q = project(lx, ly, elev + 1, ox, oy, zoom);
+        drawBlock(ctx, q.x, q.y - walk, zoom, 1, "#3868b0", "#1c3458", "#2a4c80");
       }
 
-      if (selected) {
-        const sx = Math.round((selected.x - ox) * s);
-        const sy = Math.round((selected.y - oy) * s);
-        drawFeCursor(ctx, sx, sy, s, now);
+      if (selected && selected.x >= origin.x && selected.y >= origin.y && selected.x < origin.x + CHART && selected.y < origin.y + CHART) {
+        const lx = selected.x - origin.x;
+        const ly = selected.y - origin.y;
+        const p = project(lx, ly, grid[ly][lx], ox, oy, zoom);
+        ctx.strokeStyle = "#f8f0a8";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x + (TW * zoom) / 2, p.y + (TH * zoom) / 2);
+        ctx.lineTo(p.x, p.y + TH * zoom);
+        ctx.lineTo(p.x - (TW * zoom) / 2, p.y + (TH * zoom) / 2);
+        ctx.closePath();
+        ctx.stroke();
       }
     }
 
@@ -164,10 +209,14 @@ export function WorldCanvas(props: {
       lastX = ev.clientX;
       lastY = ev.clientY;
       moved += Math.abs(dx) + Math.abs(dy);
-      const s = tilePx();
-      const origin = chartOrigin(latest.current.chart.cx, latest.current.chart.cy);
-      const nx = Math.min(origin.x + CHART - 2, Math.max(origin.x + 1, latest.current.view.x - dx / s));
-      const ny = Math.min(origin.y + CHART - 2, Math.max(origin.y + 1, latest.current.view.y - dy / s));
+      const z = zoomOf();
+      const hw = (TW * z) / 2;
+      const hh = (TH * z) / 2;
+      const a = dx / hw;
+      const b = dy / hh;
+      const origin = originOf();
+      const nx = Math.min(origin.x + CHART - 2, Math.max(origin.x + 1, latest.current.view.x - (a + b) / 2));
+      const ny = Math.min(origin.y + CHART - 2, Math.max(origin.y + 1, latest.current.view.y - (b - a) / 2));
       latest.current.onView(nx, ny);
       latest.current = { ...latest.current, view: { x: nx, y: ny } };
     }
@@ -187,7 +236,7 @@ export function WorldCanvas(props: {
     }
     function onWheel(ev: WheelEvent) {
       ev.preventDefault();
-      zoom = Math.min(5, Math.max(2, zoom - Math.sign(ev.deltaY)));
+      zoomAdd = Math.min(1.2, Math.max(-0.4, zoomAdd - Math.sign(ev.deltaY) * 0.12));
     }
     canvas.addEventListener("pointerdown", onDown);
     window.addEventListener("pointermove", onMove);
@@ -211,7 +260,7 @@ export function WorldCanvas(props: {
     latest.current = props;
   });
 
-  return <div className="canvas-host pixel-map" ref={host} title="本张大地图外圈是海。拖动只在本图内，邻图用上下左右或超大地图进入" />;
+  return <div className="canvas-host pixel-map" ref={host} title="大地图：45°立体俯视，能看出山地高度" />;
 }
 
 export function tileHint(x: number, y: number) {

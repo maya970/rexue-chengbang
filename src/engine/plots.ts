@@ -1,5 +1,6 @@
-import { BUILDING_PLOTS, BUILDINGS, CITY_H, CITY_W, PLOT_TIME } from "./catalog";
+import { BUILDING_PLOTS, BUILDINGS, CITY_H, CITY_W, PLOT_ELEV, PLOT_TIME } from "./catalog";
 import { hashXY, terrainAt } from "./map";
+import { raiseConnect } from "./height";
 import type { BuildingId, City, CityPlot, PlotKind, Terrain } from "../types";
 
 const MIX: Record<Terrain, Record<PlotKind, number>> = {
@@ -14,40 +15,111 @@ export function isCityRoad(lx: number, ly: number) {
   return lx === 5 || ly === 4;
 }
 
-function shuffle<T>(list: T[], x: number, y: number): T[] {
-  const out = [...list];
-  for (let i = out.length - 1; i > 0; i -= 1) {
-    const j = hashXY(x, y, 700 + i) % (i + 1);
-    [out[i], out[j]] = [out[j], out[i]];
+function kindForHeight(h: number, t: Terrain, n: number): PlotKind {
+  if (t === "coast" && h <= 0) return "harbor";
+  if (h <= 1) return n % 3 === 0 ? "yard" : "housing";
+  if (h === 2) return n % 2 === 0 ? "plaza" : "camp";
+  if (h === 3) return "grove";
+  return "quarry";
+}
+
+export function makeCityHeights(wx: number, wy: number): number[][] {
+  const t = terrainAt(wx, wy);
+  const grid: number[][] = [];
+  for (let ly = 0; ly < CITY_H; ly += 1) {
+    grid[ly] = [];
+    for (let lx = 0; lx < CITY_W; lx += 1) {
+      const slope = (lx / Math.max(1, CITY_W - 1) + ly / Math.max(1, CITY_H - 1)) / 2;
+      const n = hashXY(wx + lx, wy + ly, 90) / 4294967296;
+      let h = 1;
+      if (t === "coast") h = Math.round((1 - ly / Math.max(1, CITY_H - 1)) * 3);
+      else if (t === "mountain") h = Math.round(1 + slope * 4 + n * 0.4);
+      else if (t === "forest") h = Math.round(1 + (1 - slope) * 2 + n * 0.5);
+      else if (t === "sea") h = Math.round((1 - ly / Math.max(1, CITY_H - 1)) * 2);
+      else h = Math.round(1 + Math.abs(slope - 0.45) * 2 + n * 0.3);
+      grid[ly][lx] = Math.max(0, Math.min(4, h));
+    }
   }
-  return out;
+  raiseConnect(grid);
+  return grid;
+}
+
+export function cityHeightGrid(city: City): number[][] {
+  const grid: number[][] = [];
+  for (let ly = 0; ly < CITY_H; ly += 1) {
+    grid[ly] = [];
+    for (let lx = 0; lx < CITY_W; lx += 1) grid[ly][lx] = 1;
+  }
+  if (city.plots?.length) {
+    for (const p of city.plots) {
+      if (p.ly >= 0 && p.ly < CITY_H && p.lx >= 0 && p.lx < CITY_W) {
+        grid[p.ly][p.lx] = p.elev ?? PLOT_ELEV[p.kind];
+      }
+    }
+    for (let ly = 0; ly < CITY_H; ly += 1) {
+      for (let lx = 0; lx < CITY_W; lx += 1) {
+        if (!isCityRoad(lx, ly)) continue;
+        const nbs: number[] = [];
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = lx + dx;
+          const ny = ly + dy;
+          if (nx < 0 || ny < 0 || nx >= CITY_W || ny >= CITY_H) continue;
+          if (!isCityRoad(nx, ny)) nbs.push(grid[ny][nx]);
+        }
+        grid[ly][lx] = nbs.length ? Math.round(nbs.reduce((a, b) => a + b, 0) / nbs.length) : 1;
+      }
+    }
+    raiseConnect(grid);
+    return grid;
+  }
+  return makeCityHeights(city.x, city.y);
 }
 
 export function generateCityPlots(wx: number, wy: number): CityPlot[] {
-  const mix = MIX[terrainAt(wx, wy)];
-  const kinds: PlotKind[] = [];
+  const t = terrainAt(wx, wy);
+  const heights = makeCityHeights(wx, wy);
+  const mix = MIX[t];
+  const want: PlotKind[] = [];
   (Object.keys(mix) as PlotKind[]).forEach((k) => {
-    for (let n = 0; n < mix[k]; n += 1) kinds.push(k);
+    for (let n = 0; n < mix[k]; n += 1) want.push(k);
   });
-  const cells: { lx: number; ly: number }[] = [];
+  const cells: { lx: number; ly: number; h: number }[] = [];
   for (let ly = 0; ly < CITY_H; ly += 1) {
     for (let lx = 0; lx < CITY_W; lx += 1) {
       if (isCityRoad(lx, ly)) continue;
-      cells.push({ lx, ly });
+      cells.push({ lx, ly, h: heights[ly][lx] });
     }
   }
-  const placed = shuffle(cells, wx, wy);
-  const want = shuffle(kinds, wx, wy + 9);
+  cells.sort((a, b) => a.h - b.h || a.ly - b.ly || a.lx - b.lx);
   const plots: CityPlot[] = [];
-  for (let i = 0; i < want.length && i < placed.length; i += 1) {
-    const cell = placed[i];
-    const n = hashXY(wx + cell.lx, wy + cell.ly, 411) / 4294967296;
+  const used = new Set<string>();
+  const take = (kind: PlotKind) => {
+    const target = PLOT_ELEV[kind];
+    const slot = cells.find((c) => !used.has(`${c.lx}:${c.ly}`) && Math.abs(c.h - target) <= 1)
+      || cells.find((c) => !used.has(`${c.lx}:${c.ly}`));
+    if (!slot) return;
+    used.add(`${slot.lx}:${slot.ly}`);
+    const n = hashXY(wx + slot.lx, wy + slot.ly, 411) / 4294967296;
+    plots.push({
+      id: `plot:${slot.lx}:${slot.ly}`,
+      lx: slot.lx,
+      ly: slot.ly,
+      kind,
+      timeMult: 0.72 + n * 0.7,
+      elev: slot.h,
+    });
+  };
+  for (const kind of want) take(kind);
+  for (const cell of cells) {
+    if (used.has(`${cell.lx}:${cell.ly}`)) continue;
+    const n = hashXY(wx + cell.lx, wy + cell.ly, 77);
     plots.push({
       id: `plot:${cell.lx}:${cell.ly}`,
       lx: cell.lx,
       ly: cell.ly,
-      kind: want[i],
-      timeMult: 0.72 + n * 0.7,
+      kind: kindForHeight(cell.h, t, n),
+      timeMult: 0.72 + (n / 4294967296) * 0.7,
+      elev: cell.h,
     });
   }
   return plots;
@@ -87,6 +159,9 @@ export function builtPlotCount(city: City) {
 
 export function ensureCityPlots(city: City) {
   if (!city.plots?.length) city.plots = generateCityPlots(city.x, city.y);
+  for (const p of city.plots) {
+    if (p.elev === undefined) p.elev = PLOT_ELEV[p.kind];
+  }
   for (const bid of Object.keys(BUILDINGS) as BuildingId[]) {
     const b = city.buildings[bid];
     if (!b || (b.level < 1 && !b.job)) continue;

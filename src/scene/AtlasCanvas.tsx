@@ -166,7 +166,7 @@ export function AtlasCanvas(props: {
   return (
     <div className="atlas-wrap">
       <div className="atlas-label">
-        超大地图 · {chartName(props.chart.cx, props.chart.cy)} ({props.chart.cx},{props.chart.cy}) · 点一块海图进入大地图 · 可无限平移
+        超大地图（俯视总览，不立体） · {chartName(props.chart.cx, props.chart.cy)} ({props.chart.cx},{props.chart.cy}) · 点一块进入立体大地图
       </div>
       <div className="canvas-host pixel-map atlas-host" ref={host} />
     </div>

@@ -18,12 +18,15 @@ function stubCard(c: Card): Card {
 function hideCity(city: City): City {
   return {
     ...city,
-    name: city.npc ? `未知聚落·${city.tribeLevel || 1}级` : "他人城邦",
+    name: city.systemRank
+      ? (city.systemRank === "metro" ? "系统都市" : city.systemRank === "city" ? "系统城市" : "系统小镇")
+      : city.npc ? `未知聚落·${city.tribeLevel || 1}级` : "他人城邦",
     buildings: {},
     plots: [],
     wars: [],
     buildMult: {},
     frontage: 0,
+    systemRank: city.systemRank,
   };
 }
 
@@ -37,8 +40,11 @@ export function veilWorld(world: World, viewer: string, cityId: string | null): 
     return w;
   }
 
+  const friends = new Set<string>([viewer]);
+  const gid = w.memberOf?.[viewer];
+  if (gid && w.guilds?.[gid]) for (const m of w.guilds[gid].members) friends.add(m);
   for (const id of Object.keys(w.cities)) {
-    if (w.cities[id].owner !== viewer) w.cities[id] = hideCity(w.cities[id]);
+    if (!friends.has(w.cities[id].owner)) w.cities[id] = hideCity(w.cities[id]);
   }
 
   const keep: Record<string, Card> = {};

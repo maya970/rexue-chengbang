@@ -22,6 +22,8 @@ export interface CityPlot {
   /** 这块空地已占用的建筑。空地未建则为空。 */
   building?: BuildingId;
   timeMult: number;
+  /** 连通缓坡高度，相邻格最多差 1。 */
+  elev: number;
 }
 
 export type RoleId =
@@ -50,9 +52,22 @@ export type CommandKind =
   | "enfranchise"
   | "list_card"
   | "delist_card"
-  | "buy_card";
+  | "buy_card"
+  | "create_guild"
+  | "join_guild"
+  | "leave_guild";
 
-export type MarchMission = "plunder" | "massacre" | "destroy" | "reinforce" | "colonize" | "scout";
+export type MarchMission = "plunder" | "massacre" | "destroy" | "occupy" | "reinforce" | "colonize" | "scout";
+
+export type SystemRank = "town" | "city" | "metro";
+
+export interface Guild {
+  id: string;
+  name: string;
+  leader: string;
+  members: string[];
+  createdAt: number;
+}
 
 export interface Campaign {
   id: string;
@@ -86,6 +101,7 @@ export interface Command {
   payTx?: string;
   burnTx?: string;
   feeTx?: string;
+  guildId?: string;
 }
 
 export interface CommandBatch {
@@ -191,6 +207,7 @@ export interface City {
   buildMult: Partial<Record<BuildingId, number>>;
   wars: Campaign[];
   tribeLevel?: number;
+  systemRank?: SystemRank;
 }
 
 export interface GoneSite {
@@ -254,6 +271,10 @@ export interface World {
   gone: Record<string, GoneSite>;
   raidDone: Record<string, true>;
   spentPays: Record<string, true>;
+  claims: Record<string, string>;
+  guilds: Record<string, Guild>;
+  memberOf: Record<string, string>;
+  guildBanUntil: Record<string, number>;
   simAt: number;
   digest: string;
 }

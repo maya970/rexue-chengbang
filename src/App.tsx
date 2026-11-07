@@ -4,6 +4,7 @@ import { chartName, chartOf, cityIdAt, npcAt, terrainAt, tileName } from "./engi
 import { planPath } from "./engine/path";
 import { canBuildOn, plotTimeMult } from "./engine/plots";
 import { empireTimeFactor, slaveCostFor, workersFor } from "./engine/site";
+import { adjacentClaimed, claimsGap, isClaimed } from "./engine/realm";
 import { citizensOf, corridorBlocked, idleSlaves, idleSupply, idleWorkers, recruitCapOf, worksOf } from "./engine/simulate";
 import { useGame } from "./hooks/useGame";
 import { makeCommand, statusLabel } from "./lib/cmd";
@@ -20,7 +21,7 @@ function remain(ms: number, now: number) {
   return m > 0 ? `${m}分${s % 60}秒` : `${s}秒`;
 }
 
-type Modal = "none" | "tile" | "city" | "recruit" | "squad" | "build" | "card" | "reports" | "market";
+type Modal = "none" | "tile" | "city" | "recruit" | "squad" | "build" | "card" | "reports" | "market" | "guild";
 type RosterTab = "cities" | "people" | "slaves" | "goods" | "marches";
 
 export function App() {
@@ -39,6 +40,7 @@ export function App() {
   const [rosterTab, setRosterTab] = useState<RosterTab>("cities");
   const [fromCityId, setFromCityId] = useState("");
   const [plotId, setPlotId] = useState("");
+  const [guildName, setGuildName] = useState("新城邦同盟");
 
   const sim = g.sim;
   const city = g.activeCity;
@@ -63,6 +65,11 @@ export function App() {
   const blocked = origin && path?.ok && mission !== "scout"
     ? corridorBlocked(sim, path.tiles, g.address, sel!.x, sel!.y)
     : null;
+  const claimMiss = origin && path?.ok && sel && mission === "colonize"
+    ? claimsGap(sim, g.address, path.tiles, sel.x, sel.y)
+    : null;
+  const myGuildId = g.address ? sim.memberOf?.[g.address] : "";
+  const myGuild = myGuildId ? sim.guilds?.[myGuildId] : undefined;
   const focusPlot = city?.plots?.find((p) => p.id === plotId);
   const peopleN = city && mine ? Object.values(g.world.cards).filter((c) => c.cityId === city.id && c.kind === "person").length : 0;
   const slaveN = slaves.length;
@@ -143,6 +150,7 @@ export function App() {
         <nav className="top-nav">
           <button className="btn tiny" onClick={() => setModal("reports")}>战报</button>
           <button className="btn tiny" onClick={() => setModal("market")}>货架</button>
+          <button className="btn tiny" onClick={() => setModal("guild")}>公会</button>
           <button className="btn tiny primary" onClick={() => setRosterOpen((v) => !v)}>
             {rosterOpen ? "收起名册" : "我的名册"}
           </button>
@@ -313,18 +321,28 @@ export function App() {
                 {selCity && ownSel ? (
                   <p>{selCity.name} · 宽{selCity.frontage} · 战{selCity.wars.length}</p>
                 ) : selCity ? (
-                  <p>此地不属于你，无法加载城内名册、建筑与奴隶。只能看见这里有一座{selCity.npc ? ` ${selCity.tribeLevel || 1}级固定聚落` : "城"}。</p>
+                  <p>
+                    此地不属于你，无法加载城内名册、建筑与奴隶。只能看见这里有一座
+                    {selCity.systemRank ? (selCity.systemRank === "metro" ? "系统都市" : selCity.systemRank === "city" ? "系统城市" : "系统小镇") : selCity.npc ? ` ${selCity.tribeLevel || 1}级固定聚落` : "城"}。
+                    {selCity.systemRank ? " 可占领、劫掠、屠城，不能毁灭。" : ""}
+                  </p>
                 ) : selNpc ? (
-                  <p>{selNpc.name} 固定在这格刷新，不会搬家。等级 {selNpc.level}。未攻下前看不到里面的人。</p>
+                  <p>{selNpc.name} 固定在这格刷新，不会搬家。等级 {selNpc.level}。未攻下前看不到里面的人。打下来后这格才算连通。</p>
                 ) : (
                   <p>
                     {g.myCities.length
-                      ? `开辟第二座城起：需要 ${COLONIZE_COST.persons} 张人物卡随行，并消耗奴隶 ${COLONIZE_COST.slaves}、物资 ${COLONIZE_COST.supplies}。选「开辟殖民市」出征。`
-                      : "可建第一座城。不耗卡。"}
+                      ? `第二座城必须与已打下来的格子连通。出征「开辟殖民市」：人物卡 ${COLONIZE_COST.persons}，消耗奴隶 ${COLONIZE_COST.slaves}、物资 ${COLONIZE_COST.supplies}。侦察邻格可占领空地。公会共享连通。`
+                      : "第一座城不限位置。"}
                   </p>
                 )}
+                {g.address && sel ? (
+                  <p className="muted">
+                    {isClaimed(sim, g.address, sel.x, sel.y) ? "此格已打下来（你或公会）" : adjacentClaimed(sim, g.address, sel.x, sel.y) ? "邻格已连通，侦察此格可打下空地" : "尚未连通"}
+                  </p>
+                ) : null}
                 {path?.ok ? <p className="muted">{path.naval ? "海路" : "陆路"} {path.dist} 格</p> : path && !path.ok ? <p className="err">{path.reason}</p> : null}
                 {blocked ? <p className="err">{blocked}</p> : null}
+                {claimMiss ? <p className="err">{claimMiss}</p> : null}
                 {!g.address ? <p>先创建钱包。</p> : null}
                 {g.address && !g.myCities.length ? (
                   <>
@@ -351,9 +369,9 @@ export function App() {
                     </label>
                     <div className="row">
                       <select value={mission} onChange={(e) => setMission(e.target.value as MarchMission)}>
-                        {(Object.keys(MISSION_NAME) as MarchMission[]).map((m) => <option key={m} value={m}>{MISSION_NAME[m]}</option>)}
+                        {(Object.keys(MISSION_NAME) as MarchMission[]).filter((m) => !(m === "destroy" && selCity?.systemRank)).map((m) => <option key={m} value={m}>{MISSION_NAME[m]}</option>)}
                       </select>
-                      <button className="btn primary" onClick={() => setModal("squad")} disabled={Boolean(blocked) && mission !== "scout"}>挑选将士出征</button>
+                      <button className="btn primary" onClick={() => setModal("squad")} disabled={(Boolean(blocked) && mission !== "scout") || Boolean(claimMiss)}>挑选将士出征</button>
                     </div>
                     <p className="muted">当前从 {origin.name} 出发，本城可派 {originPeople.filter((c) => !c.jobId).length} 人。</p>
                   </>
@@ -570,6 +588,42 @@ export function App() {
                     </div>
                   );
                 })}
+              </>
+            ) : null}
+
+            {modal === "guild" ? (
+              <>
+                <h3>公会</h3>
+                <p className="muted">公会共享已打下来的连通格子。退出后一个月内不能加入其他公会。</p>
+                {myGuild ? (
+                  <>
+                    <p>{myGuild.name}<small>会长 {shortAddr(myGuild.leader)} · {myGuild.members.length} 人</small></p>
+                    <button className="btn" onClick={() => {
+                      g.addCommand(makeCommand({ kind: "leave_guild", label: `退出公会 ${myGuild.name}` }));
+                      setModal("none");
+                    }}>退出公会</button>
+                  </>
+                ) : (
+                  <>
+                    {g.address && (sim.guildBanUntil?.[g.address] || 0) > g.now ? (
+                      <p className="err">禁入期至 {new Date(sim.guildBanUntil[g.address]).toLocaleString()}</p>
+                    ) : null}
+                    <input value={guildName} onChange={(e) => setGuildName(e.target.value)} />
+                    <button className="btn primary" onClick={() => {
+                      g.addCommand(makeCommand({ kind: "create_guild", label: `建立公会 ${guildName}`, name: guildName }));
+                      setModal("none");
+                    }}>建立公会</button>
+                    {Object.values(sim.guilds || {}).map((guild) => (
+                      <div className="card" key={guild.id}>
+                        <div>{guild.name}<small>{guild.members.length} 人 · {shortAddr(guild.leader)}</small></div>
+                        <button className="btn tiny" onClick={() => {
+                          g.addCommand(makeCommand({ kind: "join_guild", label: `加入 ${guild.name}`, guildId: guild.id }));
+                          setModal("none");
+                        }}>加入</button>
+                      </div>
+                    ))}
+                  </>
+                )}
               </>
             ) : null}
 

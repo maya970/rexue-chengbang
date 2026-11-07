@@ -25,6 +25,17 @@ export const PLOT_NAME: Record<PlotKind, string> = {
   yard: "工坊空地",
 };
 
+/** 空地外形相同，种类用连通高度区分。 */
+export const PLOT_ELEV: Record<PlotKind, number> = {
+  harbor: 0,
+  housing: 1,
+  yard: 1,
+  plaza: 2,
+  camp: 2,
+  grove: 3,
+  quarry: 4,
+};
+
 /** 空地种类决定建造时间系数。 */
 export const PLOT_TIME: Record<PlotKind, number> = {
   plaza: 0.82,
@@ -110,6 +121,7 @@ export const MISSION_NAME: Record<import("../types").MarchMission, string> = {
   plunder: "劫掠",
   massacre: "屠城",
   destroy: "毁灭",
+  occupy: "占领",
   reinforce: "增援",
   colonize: "开辟殖民市",
   scout: "侦察",
