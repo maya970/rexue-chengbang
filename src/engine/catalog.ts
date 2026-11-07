@@ -1,4 +1,4 @@
-import type { BuildingId, RoleId } from "../types";
+import type { BuildingId, PlotKind, RoleId } from "../types";
 
 export const APP_NAME = "Rexue-Chengbang";
 export const APP_TITLE = "热血城邦";
@@ -11,6 +11,43 @@ export const MARKET_FEE = 0.1;
 export const SUPPLY_PER_SLAVE = 2;
 
 export const COLONIZE_COST = { persons: 3, slaves: 2, supplies: 2 };
+
+export const CITY_W = 12;
+export const CITY_H = 10;
+
+export const PLOT_NAME: Record<PlotKind, string> = {
+  plaza: "广场空地",
+  housing: "民宅空地",
+  camp: "校场空地",
+  grove: "林地空地",
+  quarry: "石场空地",
+  harbor: "港湾空地",
+  yard: "工坊空地",
+};
+
+/** 空地种类决定建造时间系数。 */
+export const PLOT_TIME: Record<PlotKind, number> = {
+  plaza: 0.82,
+  housing: 0.92,
+  camp: 1,
+  grove: 1.12,
+  quarry: 1.22,
+  harbor: 1.08,
+  yard: 0.96,
+};
+
+export const BUILDING_PLOTS: Record<BuildingId, PlotKind[]> = {
+  acropolis: ["plaza", "quarry"],
+  agora: ["plaza", "yard"],
+  oikos: ["housing"],
+  barracks: ["camp"],
+  stables: ["camp", "housing"],
+  range: ["camp", "grove"],
+  wall: ["quarry"],
+  temple: ["grove", "plaza"],
+  shipyard: ["harbor", "yard"],
+  harbor: ["harbor"],
+};
 
 export function splitWinston(winston: number): { pay: number; burn: number } {
   const burn = Math.max(1, Math.floor(winston * MARKET_FEE));

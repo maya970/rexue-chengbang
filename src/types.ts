@@ -1,5 +1,7 @@
 export type Terrain = "sea" | "coast" | "plain" | "forest" | "mountain";
 
+export type PlotKind = "plaza" | "housing" | "camp" | "grove" | "quarry" | "harbor" | "yard";
+
 export type BuildingId =
   | "acropolis"
   | "agora"
@@ -11,6 +13,16 @@ export type BuildingId =
   | "temple"
   | "shipyard"
   | "harbor";
+
+export interface CityPlot {
+  id: string;
+  lx: number;
+  ly: number;
+  kind: PlotKind;
+  /** 这块空地已占用的建筑。空地未建则为空。 */
+  building?: BuildingId;
+  timeMult: number;
+}
 
 export type RoleId =
   | "hoplite"
@@ -54,6 +66,7 @@ export interface Command {
   label: string;
   cityId?: string;
   building?: BuildingId;
+  plotId?: string;
   role?: RoleId;
   name?: string;
   x?: number;
@@ -171,6 +184,7 @@ export interface City {
   x: number;
   y: number;
   buildings: Partial<Record<BuildingId, BuildingState>>;
+  plots: CityPlot[];
   foundedAt: number;
   npc: boolean;
   frontage: number;

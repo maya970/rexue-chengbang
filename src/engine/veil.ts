@@ -20,6 +20,7 @@ function hideCity(city: City): City {
     ...city,
     name: city.npc ? `未知聚落·${city.tribeLevel || 1}级` : "他人城邦",
     buildings: {},
+    plots: [],
     wars: [],
     buildMult: {},
     frontage: 0,

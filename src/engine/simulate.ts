@@ -4,6 +4,7 @@ import { citizensOf, garrisonPeople, garrisonShips, recruitCapOf, recruitableCou
 import { resolveFight } from "./combat";
 import { canFound, cityIdAt, isCoast, npcAt, npcPower, respawnMs, terrainAt } from "./map";
 import { marchSeconds, planPath, posAt, timeAtIndex } from "./path";
+import { ensureCityPlots, findPlotFor, occupyPlot, plotTimeMult, seedCityPlots } from "./plots";
 import { buildMultAt, empireTimeFactor, frontageAt, slaveCostFor, workersFor } from "./site";
 import { u32 } from "./hash";
 import type { BattleReport, BuildingId, Campaign, Card, City, Command, March, MarketPair, RoleId, Squad, TrackedBatch, TxProof, World, WorldCheckpoint } from "../types";
@@ -77,8 +78,10 @@ function makeNpcCity(world: World, x: number, y: number, garrison = false) {
       frontage: frontageAt(x, y),
       buildMult: buildMultAt(x, y),
       wars: [],
+      plots: [],
       tribeLevel: site.level,
     };
+    seedCityPlots(world.cities[id], (Object.keys(world.cities[id].buildings) as BuildingId[]).filter((bid) => (world.cities[id].buildings[bid]?.level || 0) > 0));
   }
   if (garrison) fillNpcGarrison(world, world.cities[id]);
 }
@@ -105,6 +108,7 @@ function finishJobs(world: World, city: City, t: number) {
 }
 
 function tickCity(world: World, city: City, t: number) {
+  ensureCityPlots(city);
   finishJobs(world, city, t);
 }
 
@@ -411,6 +415,7 @@ function resolveArrival(world: World, march: March, t: number) {
       x: march.toX,
       y: march.toY,
       buildings: { acropolis: { level: 1, wars: [] }, oikos: { level: 1, wars: [] } },
+      plots: [],
       foundedAt: t,
       npc: false,
       frontage: frontageAt(march.toX, march.toY),
@@ -418,6 +423,7 @@ function resolveArrival(world: World, march: March, t: number) {
       wars: [],
     };
     world.cities[city.id] = city;
+    seedCityPlots(city, ["acropolis", "oikos"]);
     parkAt(world, still, city);
     world.reports.unshift({
       id: `col:${march.id}`,
@@ -651,6 +657,7 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
         agora: { level: 1, wars: [] },
         barracks: { level: 1, wars: [] },
       },
+      plots: [],
       foundedAt: t,
       npc: false,
       frontage: frontageAt(x, y),
@@ -658,6 +665,7 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
       wars: [],
     };
     world.cities[city.id] = city;
+    seedCityPlots(city, ["acropolis", "oikos", "agora", "barracks"]);
     (["hoplite", "peltast"] as RoleId[]).forEach((role, i) => {
       const card = mintCard({
         id: uniqueId([batchKey, cmd.id, role, String(i)]),
@@ -691,9 +699,12 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     if (!city || city.owner !== owner) return skip(world, cmd, "城邦不属于你");
     const bid = cmd.building!;
     const def = BUILDINGS[bid];
+    ensureCityPlots(city);
     if (def.needCoast && !isCoast(terrainAt(city.x, city.y))) return skip(world, cmd, "必须沿海");
     const cur = city.buildings[bid] || { level: 0, wars: [] };
     if (Object.values(city.buildings).some((b) => b?.job)) return skip(world, cmd, "本城已有一座建筑在建，不能再排队");
+    const plot = findPlotFor(city, bid, cmd.plotId);
+    if (!plot) return skip(world, cmd, cur.level < 1 ? "空地不符或已被占用，一块空地只能建一座建筑" : "找不到这座建筑的地块");
     const acro = city.buildings.acropolis?.level || 1;
     if (bid !== "acropolis" && cur.level >= acro) return skip(world, cmd, "需先升级卫城");
     if (cur.level >= def.max) return skip(world, cmd, "已达最高等级");
@@ -708,10 +719,10 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
       return skip(world, cmd, "监工人选已被占用");
     }
     if (!consumeMaterials(world, city.id, cost)) return skip(world, cmd, `建造需要 ${cost} 张物资或奴隶折算`);
+    occupyPlot(city, bid, plot.id);
     const jobId = uniqueId([batchKey, cmd.id, "job"]);
     lockWorkers(world, workers, jobId);
-    const mult = city.buildMult[bid] || 1;
-    const time = scaleTime(def.baseTime, next, (1 - (city.buildings.agora?.level || 0) * 0.02) * mult * ownerScale(world, owner)) * 1000;
+    const time = scaleTime(def.baseTime, next, (1 - (city.buildings.agora?.level || 0) * 0.02) * plotTimeMult(city, bid, plot) * ownerScale(world, owner)) * 1000;
     city.buildings[bid] = { ...cur, level: cur.level, job: { to: next, finishAt: t + time, workerIds: workers.map((c) => c.id), material: cost } };
     return;
   }
