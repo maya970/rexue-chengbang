@@ -1,0 +1,38 @@
+name: Index Permabin world
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [index-world]
+  push:
+    paths:
+      - "src/engine/**"
+      - "src/lib/query.ts"
+      - "scripts/index-world.ts"
+      - ".github/workflows/index-world.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run index-world
+        env:
+          ARWEAVE_GATEWAY: ${{ vars.ARWEAVE_GATEWAY || 'https://arweave.net' }}
+          ARWEAVE_GQL: ${{ vars.ARWEAVE_GQL || 'https://arweave.net/graphql' }}
+      - uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./indexer-out
+          publish_branch: world-index
+          force_orphan: true
