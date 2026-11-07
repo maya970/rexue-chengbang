@@ -116,6 +116,11 @@ export function canFound(t: Terrain): boolean {
   return t === "plain" || t === "coast" || t === "forest" || t === "mountain" || t === "sea";
 }
 
+/** 第二座城起不能殖民海域。海岸、平原、林地、山地可以。 */
+export function canColonize(t: Terrain): boolean {
+  return t === "plain" || t === "coast" || t === "forest" || t === "mountain";
+}
+
 export function tileName(t: Terrain): string {
   return { sea: "海域", coast: "海岸", plain: "平原", forest: "林地", mountain: "山地" }[t];
 }

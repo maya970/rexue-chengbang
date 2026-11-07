@@ -2,7 +2,7 @@ import { berthOf, byIds, mintCard, slowest, uniqueId } from "./cards";
 import { AR_FEE_ADDR, BUILDINGS, COLONIZE_COST, MISSION_NAME, ROLES, scaleTime, splitWinston, SUPPLY_PER_SLAVE } from "./catalog";
 import { buildSlotsOf, citizensOf, garrisonPeople, garrisonShips, recruitCapOf, recruitableCount, roleCapOf, roleCountOf, worksOf } from "./citymath";
 import { resolveFight } from "./combat";
-import { canFound, chartOf, CHART, cityIdAt, isWater, npcAt, npcPower, respawnMs, terrainAt } from "./map";
+import { canColonize, canFound, chartOf, CHART, cityIdAt, isWater, npcAt, npcPower, respawnMs, terrainAt } from "./map";
 import { marchSeconds, planPath, posAt, timeAtIndex } from "./path";
 import { ensureCityPlots, findPlotFor, occupyPlot, plotTimeMult, seedCityPlots } from "./plots";
 import {
@@ -389,7 +389,7 @@ function applyAftermath(world: World, march: March, dest: City, t: number, soldi
     world.reports[0].slaves = slaves;
     world.reports[0].supplies = supplies;
     world.reports[0].aftermath = "plunder";
-    world.reports[0].rounds.push({ title: "劫掠", text: `带走奴隶卡 ${slaves}、物资卡 ${supplies}。因兵民悬殊，只毁去 ${hurt} 级建筑。城未易主。` });
+    world.reports[0].rounds.push({ key: "plunder", params: { slaves, supplies, hurt }, title: "劫掠", text: `带走奴隶卡 ${slaves}、物资卡 ${supplies}。因兵民悬殊，只毁去 ${hurt} 级建筑。城未易主。` });
     claimTile(world, march.owner, dest.x, dest.y);
     returnHome(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), origin?.id);
     return;
@@ -400,7 +400,7 @@ function applyAftermath(world: World, march: March, dest: City, t: number, soldi
     parkAt(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), dest);
     claimTile(world, march.owner, dest.x, dest.y);
     world.reports[0].aftermath = "occupy";
-    world.reports[0].rounds.push({ title: "占领", text: `${dest.name} 易主。系统城不能毁灭，可占领、劫掠、屠城。` });
+    world.reports[0].rounds.push({ key: "occupy", params: { name: dest.name }, title: "占领", text: `${dest.name} 易主。系统城不能毁灭，可占领、劫掠、屠城。` });
     return;
   }
   if (march.mission === "massacre") {
@@ -413,7 +413,7 @@ function applyAftermath(world: World, march: March, dest: City, t: number, soldi
     world.reports[0].slaves = slaves;
     world.reports[0].supplies = supplies;
     world.reports[0].aftermath = "massacre";
-    world.reports[0].rounds.push({ title: "屠城", text: `城易主。毁建筑 ${hurt} 级，得奴隶卡 ${slaves}、物资卡 ${supplies}。兵少则毁不了太多。` });
+    world.reports[0].rounds.push({ key: "massacre", params: { hurt, slaves, supplies }, title: "屠城", text: `城易主。毁建筑 ${hurt} 级，得奴隶卡 ${slaves}、物资卡 ${supplies}。兵少则毁不了太多。` });
     claimTile(world, march.owner, dest.x, dest.y);
     return;
   }
@@ -424,7 +424,7 @@ function applyAftermath(world: World, march: March, dest: City, t: number, soldi
       parkAt(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), dest);
       claimTile(world, march.owner, dest.x, dest.y);
       world.reports[0].aftermath = "occupy";
-      world.reports[0].rounds.push({ title: "不能毁灭", text: `${dest.name} 是系统城，已改为占领。` });
+      world.reports[0].rounds.push({ key: "noDestroy", params: { name: dest.name }, title: "不能毁灭", text: `${dest.name} 是系统城，已改为占领。` });
       return;
     }
     const slaves = mintSlaves(world, Math.max(1, Math.floor(works * 0.14)), march.owner, origin?.id || dest.id, t, seed);
@@ -432,7 +432,7 @@ function applyAftermath(world: World, march: March, dest: City, t: number, soldi
     world.reports[0].slaves = slaves;
     world.reports[0].supplies = supplies;
     world.reports[0].aftermath = "destroy";
-    world.reports[0].rounds.push({ title: "毁灭", text: `${dest.name} 从地图上抹去。奴隶卡 ${slaves}、物资卡 ${supplies} 带回。` });
+    world.reports[0].rounds.push({ key: "destroy", params: { name: dest.name, slaves, supplies }, title: "毁灭", text: `${dest.name} 从地图上抹去。奴隶卡 ${slaves}、物资卡 ${supplies} 带回。` });
     returnHome(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), origin?.id);
     destroyCity(world, dest, t);
   }
@@ -448,12 +448,14 @@ function resolveArrival(world: World, march: March, t: number) {
     if (!dest && adjacentClaimed(world, march.owner, march.toX, march.toY)) {
       claimTile(world, march.owner, march.toX, march.toY);
     }
+    const scoutKey = dest ? "scoutCity" : adjacentClaimed(world, march.owner, march.toX, march.toY) ? "scoutOpen" : "scoutBlocked";
     const report: BattleReport = {
       id: `scout:${march.id}`,
       time: t,
       title: "侦察回报",
+      code: "scout",
       attacker: march.owner,
-      defender: dest?.owner || "荒野",
+      defender: dest?.owner || "__wild__",
       x: march.toX,
       y: march.toY,
       naval: march.naval,
@@ -461,6 +463,10 @@ function resolveArrival(world: World, march: March, t: number) {
       win: true,
       rounds: [
         {
+          key: scoutKey,
+          params: dest
+            ? { wars: dest.wars.length, cit: citizensOf(dest, world), people: garrisonPeople(world, dest.id).length, ships: garrisonShips(world, dest.id).length, width: dest.frontage }
+            : {},
           title: "斥候",
           text: dest
             ? `城墙履历 ${dest.wars.length} 场。公民约 ${citizensOf(dest, world)}，名册 ${garrisonPeople(world, dest.id).length}，舰只 ${garrisonShips(world, dest.id).length}，宽度 ${dest.frontage}。`
@@ -485,14 +491,20 @@ function resolveArrival(world: World, march: March, t: number) {
       id: `rf:${march.id}`,
       time: t,
       title: ownCity ? "增援抵达" : "增援折返",
+      code: ownCity ? "reinforceOk" : "reinforceBack",
       attacker: march.owner,
-      defender: dest?.name || "途中",
+      defender: dest?.name || "__enroute__",
       x: march.toX,
       y: march.toY,
       naval: march.naval,
       field: false,
       win: Boolean(ownCity),
-      rounds: [{ title: "回报", text: ownCity ? `${still.length} 人进入 ${ownCity.name}。` : "目标不是自己的城，军团已返回出发城。" }],
+      rounds: [{
+        key: ownCity ? "reinforceIn" : "reinforceReturn",
+        params: { n: still.length, name: ownCity?.name || "" },
+        title: "回报",
+        text: ownCity ? `${still.length} 人进入 ${ownCity.name}。` : "目标不是自己的城，军团已返回出发城。",
+      }],
       deadNames: [],
       aftermath: "reinforce",
     });
@@ -501,21 +513,22 @@ function resolveArrival(world: World, march: March, t: number) {
   }
 
   if (march.mission === "colonize" && !dest) {
-    if (!canFound(terrainAt(march.toX, march.toY)) || (world.gone[cityIdAt(march.toX, march.toY)]?.respawnAt || 0) > t) {
+    if (!canColonize(terrainAt(march.toX, march.toY)) || (world.gone[cityIdAt(march.toX, march.toY)]?.respawnAt || 0) > t) {
       returnHome(world, still, origin?.id);
       world.skipped.push(`${march.id}:殖民地点不可建城`);
       world.reports.unshift({
         id: `colfail:${march.id}`,
         time: t,
         title: "殖民失败",
+        code: "colonizeFail",
         attacker: march.owner,
-        defender: "荒野",
+        defender: "__wild__",
         x: march.toX,
         y: march.toY,
         naval: march.naval,
         field: false,
         win: false,
-        rounds: [{ title: "回报", text: "此地不能建城，军团已返回出发城。" }],
+        rounds: [{ key: "colonizeFailText", params: {}, title: "回报", text: "此地不能建城，军团已返回出发城。" }],
         deadNames: [],
         aftermath: "colonize",
       });
@@ -548,14 +561,15 @@ function resolveArrival(world: World, march: March, t: number) {
       id: `col:${march.id}`,
       time: t,
       title: "殖民成功",
+      code: "colonizeOk",
       attacker: march.owner,
-      defender: "荒野",
+      defender: "__wild__",
       x: march.toX,
       y: march.toY,
       naval: march.naval,
       field: false,
       win: true,
-      rounds: [{ title: "开辟", text: `${city.name} 建立。消耗奴隶 ${COLONIZE_COST.slaves}、物资 ${COLONIZE_COST.supplies}，人物卡迁入新城。` }],
+      rounds: [{ key: "colonizeText", params: { name: city.name, slaves: COLONIZE_COST.slaves, supplies: COLONIZE_COST.supplies }, title: "开辟", text: `${city.name} 建立。消耗奴隶 ${COLONIZE_COST.slaves}、物资 ${COLONIZE_COST.supplies}，人物卡迁入新城。` }],
       deadNames: [],
       aftermath: "colonize",
     });
@@ -569,14 +583,15 @@ function resolveArrival(world: World, march: March, t: number) {
       id: `empty:${march.id}`,
       time: t,
       title: `${MISSION_NAME[march.mission]}无果`,
+      code: "empty",
       attacker: march.owner,
-      defender: "荒野",
+      defender: "__wild__",
       x: march.toX,
       y: march.toY,
       naval: march.naval,
       field: false,
       win: false,
-      rounds: [{ title: "回报", text: `目标格没有城。${still.length} 人已返回出发城。` }],
+      rounds: [{ key: "emptyText", params: { n: still.length, mission: march.mission }, title: "回报", text: `目标格没有城。${still.length} 人已返回出发城。` }],
       deadNames: [],
       aftermath: march.mission,
     });
@@ -584,12 +599,40 @@ function resolveArrival(world: World, march: March, t: number) {
     return;
   }
 
+  const friends = alliesOf(world, march.owner);
+  const war = march.mission === "plunder" || march.mission === "massacre" || march.mission === "destroy" || march.mission === "occupy";
+  if (war && friends.has(dest.owner)) {
+    returnHome(world, still, origin?.id);
+    world.reports.unshift({
+      id: `ally:${march.id}`,
+      time: t,
+      title: dest.owner === march.owner ? "不能攻击自己" : "不能攻击公会",
+      code: dest.owner === march.owner ? "noSelf" : "noGuild",
+      attacker: march.owner,
+      defender: dest.name,
+      x: march.toX,
+      y: march.toY,
+      naval: march.naval,
+      field: false,
+      win: false,
+      rounds: [{
+        key: dest.owner === march.owner ? "noSelfText" : "noGuildText",
+        params: { name: dest.name },
+        title: "回报",
+        text: dest.owner === march.owner ? "不能攻击自己的城，军团已返回。" : "不能攻击同公会成员，军团已返回。",
+      }],
+      deadNames: [],
+    });
+    delete world.marches[march.id];
+    return;
+  }
   if (dest.owner === march.owner) {
     parkAt(world, still, dest);
     world.reports.unshift({
       id: `home:${march.id}`,
       time: t,
       title: "军团入城",
+      code: "home",
       attacker: march.owner,
       defender: dest.name,
       x: march.toX,
@@ -597,7 +640,7 @@ function resolveArrival(world: World, march: March, t: number) {
       naval: march.naval,
       field: false,
       win: true,
-      rounds: [{ title: "回报", text: `${still.length} 人进入自己的 ${dest.name}。` }],
+      rounds: [{ key: "homeText", params: { n: still.length, name: dest.name }, title: "回报", text: `${still.length} 人进入自己的 ${dest.name}。` }],
       deadNames: [],
     });
     delete world.marches[march.id];
@@ -610,7 +653,7 @@ function resolveArrival(world: World, march: March, t: number) {
     if (world.cities[dest.id]) applyAftermath(world, march, dest, t, soldiers);
   } else {
     returnHome(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), origin?.id);
-    fight.report.rounds.push({ title: "回报", text: "失利，幸存者已返回出发城。" });
+    fight.report.rounds.push({ key: "loseReturn", params: {}, title: "回报", text: "失利，幸存者已返回出发城。" });
   }
   delete world.marches[march.id];
 }
@@ -623,6 +666,7 @@ function findClashes(world: World, t: number): { a: March; b: March; time: numbe
       const a = list[i];
       const b = list[j];
       if (a.owner === b.owner) continue;
+      if (alliesOf(world, a.owner).has(b.owner)) continue;
       const windowStart = Math.max(a.startAt, b.startAt);
       const windowEnd = Math.min(a.arriveAt, b.arriveAt, t);
       if (windowEnd <= windowStart) continue;
@@ -980,10 +1024,16 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
       if (blocked) return skip(world, cmd, blocked);
     }
     if (cmd.mission === "colonize") {
+      if (!canColonize(terrainAt(cmd.toX!, cmd.toY!))) return skip(world, cmd, "海域不能殖民，请选海岸或陆地");
       const gap = claimsGap(world, owner, path.tiles, cmd.toX!, cmd.toY!);
       if (gap) return skip(world, cmd, gap);
     }
     const destCity = cityAt(world, cmd.toX!, cmd.toY!);
+    const war = cmd.mission === "plunder" || cmd.mission === "massacre" || cmd.mission === "destroy" || cmd.mission === "occupy";
+    if (war && destCity) {
+      if (destCity.owner === owner) return skip(world, cmd, "不能攻击自己的城");
+      if (alliesOf(world, owner).has(destCity.owner)) return skip(world, cmd, "不能攻击同公会成员");
+    }
     if (cmd.mission === "destroy" && destCity?.systemRank) {
       return skip(world, cmd, "系统城不能毁灭，请改占领、劫掠或屠城");
     }

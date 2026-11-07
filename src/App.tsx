@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BUILDINGS, COLONIZE_COST, MISSION_NAME, PLOT_NAME, PLOT_TIME, ROLES, scaleTime, SUPPLY_PER_SLAVE } from "./engine/catalog";
-import { chartName, chartOf, cityIdAt, npcAt, terrainAt, tileName } from "./engine/map";
+import { canColonize, chartName, chartOf, cityIdAt, npcAt, terrainAt, tileName } from "./engine/map";
 import { planPath } from "./engine/path";
 import { canBuildOn, plotTimeMult } from "./engine/plots";
 import { empireTimeFactor, slaveCostFor, workersFor } from "./engine/site";
 import { adjacentClaimed, claimsGap, isClaimed } from "./engine/realm";
-import { buildSlotsOf, citizensOf, corridorBlocked, idleSlaves, idleSupply, idleWorkers, recruitCapOf, roleCapOf, roleCountOf, worksOf } from "./engine/simulate";
+import { alliesOf, buildSlotsOf, citizensOf, corridorBlocked, idleSlaves, idleSupply, idleWorkers, recruitCapOf, roleCapOf, roleCountOf, worksOf } from "./engine/simulate";
 import { loadInbox, mergeInbox } from "./lib/inbox";
 import { HelpBoard } from "./i18n/HelpBoard";
 import { LangSelect, useI18n } from "./i18n";
+import { formatReport, reportHay } from "./i18n/report";
 import { useGame } from "./hooks/useGame";
 import { makeCommand, statusLabel } from "./lib/cmd";
 import { arToWinston, winstonToAr } from "./lib/market";
@@ -41,7 +42,7 @@ function marketBucket(role?: string) {
 }
 
 export function App() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const g = useGame();
   const fileRef = useRef<HTMLInputElement>(null);
   const [modal, setModal] = useState<Modal>("none");
@@ -105,6 +106,9 @@ export function App() {
   const claimMiss = origin && path?.ok && sel && mission === "colonize"
     ? claimsGap(sim, g.address, path.tiles, sel.x, sel.y)
     : null;
+  const seaColonize = Boolean(sel && mission === "colonize" && !canColonize(terrainAt(sel.x, sel.y)));
+  const warMission = mission === "plunder" || mission === "massacre" || mission === "destroy" || mission === "occupy";
+  const friendlyFire = Boolean(selCity && g.address && warMission && alliesOf(sim, g.address).has(selCity.owner));
   const myGuildId = g.address ? sim.memberOf?.[g.address] : "";
   const myGuild = myGuildId ? sim.guilds?.[myGuildId] : undefined;
   const focusPlot = city?.plots?.find((p) => p.id === plotId);
@@ -176,14 +180,14 @@ export function App() {
     return mineReports.filter((r) => {
       if (boardCat === "win" && !r.win) return false;
       if (boardCat === "lose" && r.win) return false;
-      if (boardCat === "scout" && !r.title.includes("侦察")) return false;
-      if (boardCat === "colonize" && r.aftermath !== "colonize" && !r.title.includes("殖民")) return false;
-      if (boardCat === "reinforce" && r.aftermath !== "reinforce" && !r.title.includes("增援")) return false;
-      if (boardCat === "fight" && r.aftermath !== "plunder" && r.aftermath !== "massacre" && r.aftermath !== "occupy" && r.aftermath !== "destroy" && !r.title.includes("攻") && !r.title.includes("野")) return false;
+      if (boardCat === "scout" && r.code !== "scout" && r.aftermath !== "scout" && !r.title.includes("侦察") && !r.title.toLowerCase().includes("scout")) return false;
+      if (boardCat === "colonize" && r.aftermath !== "colonize" && r.code !== "colonizeOk" && r.code !== "colonizeFail" && !r.title.includes("殖民")) return false;
+      if (boardCat === "reinforce" && r.aftermath !== "reinforce" && r.code !== "reinforceOk" && r.code !== "reinforceBack" && !r.title.includes("增援")) return false;
+      if (boardCat === "fight" && r.aftermath !== "plunder" && r.aftermath !== "massacre" && r.aftermath !== "occupy" && r.aftermath !== "destroy" && r.code !== "fieldWin" && r.code !== "fieldLose" && r.code !== "siegeWin" && r.code !== "siegeLose" && !r.title.includes("攻") && !r.title.includes("野")) return false;
       if (!q) return true;
-      return hay([r.title, r.x, r.y, r.aftermath, ...(r.rounds || []).flatMap((x) => [x.title, x.text]), ...(r.deadNames || [])]).includes(q);
+      return hay([r.x, r.y, reportHay(locale, r), ...(r.deadNames || [])]).includes(q);
     });
-  }, [mineReports, boardQ, boardCat]);
+  }, [mineReports, boardQ, boardCat, locale]);
 
   const filteredListings = useMemo(() => {
     const q = boardQ.trim().toLowerCase();
@@ -469,9 +473,16 @@ export function App() {
 
       {toast ? (
         <button className="report-toast" onClick={openReports}>
-          <b>军团回报</b> {toast.win ? "成功" : "失败"} · {toast.title}
-          {toast.slaves || toast.supplies ? ` · 奴隶${toast.slaves || 0} 物资${toast.supplies || 0}` : ""}
-          {toast.deadNames?.length ? ` · 阵亡${toast.deadNames.length}` : ""}
+          {(() => {
+            const mail = formatReport(locale, toast);
+            return (
+              <>
+                <b>{mail.toast}</b> {toast.win ? mail.toastOk : mail.toastBad} · {mail.title}
+                {mail.loot ? ` · ${mail.loot}` : ""}
+                {toast.deadNames?.length ? ` · ${mail.dead}` : ""}
+              </>
+            );
+          })()}
         </button>
       ) : null}
 
@@ -495,7 +506,7 @@ export function App() {
                 ) : (
                   <p>
                     {g.myCities.length
-                      ? `第二座城必须与已打下来的格子连通。出征「开辟殖民市」：人物卡 ${COLONIZE_COST.persons}，消耗奴隶 ${COLONIZE_COST.slaves}、物资 ${COLONIZE_COST.supplies}。侦察邻格可占领空地。公会共享连通。海域、山地都可以殖民。`
+                      ? `第二座城必须与已打下来的格子连通。出征「开辟殖民市」：人物卡 ${COLONIZE_COST.persons}，消耗奴隶 ${COLONIZE_COST.slaves}、物资 ${COLONIZE_COST.supplies}。侦察邻格可占领空地。公会共享连通。海域不能殖民。不能攻击自己或同公会成员。`
                       : terrainAt(sel.x, sel.y) === "sea"
                         ? "第一座城可以建在海域，建成海港城，自带港口、船厂和运输船。"
                         : terrainAt(sel.x, sel.y) === "mountain"
@@ -511,6 +522,8 @@ export function App() {
                 {path?.ok ? <p className="muted">{path.naval ? "海路" : "陆路"} {path.dist} 格</p> : path && !path.ok ? <p className="err">{path.reason}</p> : null}
                 {blocked ? <p className="err">{blocked}</p> : null}
                 {claimMiss ? <p className="err">{claimMiss}</p> : null}
+                {seaColonize ? <p className="err">海域不能殖民，请选海岸或陆地。</p> : null}
+                {friendlyFire ? <p className="err">{selCity?.owner === g.address ? "不能攻击自己的城。" : "不能攻击同公会成员。"}</p> : null}
                 {!g.address ? <p>先创建钱包。</p> : null}
                 {g.address && !g.myCities.length ? (
                   <>
@@ -545,9 +558,14 @@ export function App() {
                     </label>
                     <div className="row">
                       <select value={mission} onChange={(e) => setMission(e.target.value as MarchMission)}>
-                        {(Object.keys(MISSION_NAME) as MarchMission[]).filter((m) => !(m === "destroy" && selCity?.systemRank)).map((m) => <option key={m} value={m}>{MISSION_NAME[m]}</option>)}
+                        {(Object.keys(MISSION_NAME) as MarchMission[]).filter((m) => {
+                          if (m === "destroy" && selCity?.systemRank) return false;
+                          if (m === "colonize" && sel && !canColonize(terrainAt(sel.x, sel.y))) return false;
+                          if ((m === "plunder" || m === "massacre" || m === "destroy" || m === "occupy") && selCity && g.address && alliesOf(sim, g.address).has(selCity.owner)) return false;
+                          return true;
+                        }).map((m) => <option key={m} value={m}>{MISSION_NAME[m]}</option>)}
                       </select>
-                      <button className="btn primary" onClick={() => setModal("squad")} disabled={(Boolean(blocked) && mission !== "scout") || Boolean(claimMiss)}>挑选将士出征</button>
+                      <button className="btn primary" onClick={() => setModal("squad")} disabled={(Boolean(blocked) && mission !== "scout") || Boolean(claimMiss) || seaColonize || friendlyFire}>挑选将士出征</button>
                     </div>
                     <p className="muted">当前从 {origin.name} 出发，本城可派 {originPeople.filter((c) => !c.jobId).length} 人。</p>
                   </>
@@ -661,6 +679,8 @@ export function App() {
                 <h3>从 {origin.name} 出征 · {MISSION_NAME[mission]}</h3>
                 <p className="muted">必须勾选将士。目标是大地图点中的格子，出发城是上面选的城。</p>
                 {blocked && mission !== "scout" ? <p className="err">{blocked}</p> : null}
+                {seaColonize ? <p className="err">海域不能殖民，请选海岸或陆地。</p> : null}
+                {friendlyFire ? <p className="err">{selCity?.owner === g.address ? "不能攻击自己的城。" : "不能攻击同公会成员。"}</p> : null}
                 {originPeople.filter((c) => !c.jobId && !c.listedWinston).length === 0 ? <p className="err">出发城里没有空闲将士。</p> : null}
                 {originPeople.filter((c) => !c.jobId && !c.listedWinston).map((c) => (
                   <label key={c.id} className="card">
@@ -675,7 +695,7 @@ export function App() {
                   </label>
                 ))}
                 {sel ? (
-                  <button className="btn primary" disabled={(Boolean(blocked) && mission !== "scout") || pickedP.length === 0} onClick={() => {
+                  <button className="btn primary" disabled={(Boolean(blocked) && mission !== "scout") || pickedP.length === 0 || seaColonize || friendlyFire} onClick={() => {
                     g.addCommand(makeCommand({
                       kind: "march",
                       label: `${MISSION_NAME[mission]} 从${origin.name} → (${sel.x},${sel.y})`,
@@ -843,15 +863,18 @@ export function App() {
                   ))}
                 </div>
                 <div className="board-body">
-                  {filteredReports.length ? filteredReports.map((r) => (
-                    <article key={r.id} className="report">
-                      <h4>{r.win ? "成" : "败"} · {r.title} ({r.x},{r.y})</h4>
-                      <p className="muted">{new Date(r.time).toLocaleString()}{r.aftermath ? ` · ${MISSION_NAME[r.aftermath]}` : ""}</p>
-                      {(r.rounds || []).map((round, i) => <p key={i}><b>{round.title}</b> {round.text}</p>)}
-                      {r.slaves || r.supplies ? <p>缴获奴隶 {r.slaves || 0} · 物资 {r.supplies || 0}</p> : null}
-                      {r.deadNames?.length ? <p className="err">阵亡：{r.deadNames.join("、")}</p> : null}
-                    </article>
-                  )) : <p className="muted">{mineReports.length ? t("emptyReports") : t("emptyReportsNone")}</p>}
+                  {filteredReports.length ? filteredReports.map((r) => {
+                    const mail = formatReport(locale, r);
+                    return (
+                      <article key={r.id} className="report">
+                        <h4>{mail.badge} · {mail.title} ({r.x},{r.y})</h4>
+                        <p className="muted">{new Date(r.time).toLocaleString()}{mail.aftermath ? ` · ${mail.aftermath}` : ""}</p>
+                        {mail.rounds.map((round, i) => <p key={i}><b>{round.title}</b> {round.text}</p>)}
+                        {mail.loot ? <p>{mail.loot}</p> : null}
+                        {mail.dead ? <p className="err">{mail.dead}</p> : null}
+                      </article>
+                    );
+                  }) : <p className="muted">{mineReports.length ? t("emptyReports") : t("emptyReportsNone")}</p>}
                 </div>
               </>
             ) : null}

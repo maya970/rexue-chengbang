@@ -128,11 +128,11 @@ export function CityCanvas(props: {
           }
           if (plot?.building) {
             const roof = ROOF[plot.building];
+            const q = project(lx, ly, water ? 0.4 : elev + 1.15, ox, oy, zoom, yaw, CITY_W, CITY_H);
             if (!water) {
-              const q = project(lx, ly, elev + 1, ox, oy, zoom, yaw, CITY_W, CITY_H);
               drawBlock(ctx, q.x, q.y, zoom, 1, roof.top, roof.left, roof.right);
             }
-            drawIsoSprite(ctx, p.x, p.y, zoom, buildingTile(plot.building), 16, 0.9);
+            drawIsoSprite(ctx, q.x, q.y, zoom, buildingTile(plot.building), 16, 0.38);
           }
         }
       }

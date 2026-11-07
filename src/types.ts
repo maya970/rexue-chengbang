@@ -235,15 +235,31 @@ export interface March {
   entropy: string;
 }
 
+export interface BattleHit {
+  kind: "kill" | "miss";
+  striker: string;
+  tgt: string;
+  roll: string;
+  chance: string;
+  rear?: boolean;
+  frail?: boolean;
+}
+
+export type RoundParams = Record<string, string | number | boolean | BattleHit[] | undefined>;
+
 export interface BattleRound {
   title: string;
   text: string;
+  key?: string;
+  params?: RoundParams;
 }
 
 export interface BattleReport {
   id: string;
   time: number;
   title: string;
+  /** 展示用标题键，切语言时重译。 */
+  code?: string;
   attacker: string;
   defender: string;
   x: number;
