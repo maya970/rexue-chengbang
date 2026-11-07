@@ -5,7 +5,10 @@ import { planPath } from "./engine/path";
 import { canBuildOn, plotTimeMult } from "./engine/plots";
 import { empireTimeFactor, slaveCostFor, workersFor } from "./engine/site";
 import { adjacentClaimed, claimsGap, isClaimed } from "./engine/realm";
-import { citizensOf, corridorBlocked, idleSlaves, idleSupply, idleWorkers, recruitCapOf, worksOf } from "./engine/simulate";
+import { buildSlotsOf, citizensOf, corridorBlocked, idleSlaves, idleSupply, idleWorkers, recruitCapOf, roleCapOf, roleCountOf, worksOf } from "./engine/simulate";
+import { loadInbox, mergeInbox } from "./lib/inbox";
+import { HelpBoard } from "./i18n/HelpBoard";
+import { LangSelect, useI18n } from "./i18n";
 import { useGame } from "./hooks/useGame";
 import { makeCommand, statusLabel } from "./lib/cmd";
 import { arToWinston, winstonToAr } from "./lib/market";
@@ -21,7 +24,7 @@ function remain(ms: number, now: number) {
   return m > 0 ? `${m}分${s % 60}秒` : `${s}秒`;
 }
 
-type Modal = "none" | "tile" | "city" | "recruit" | "squad" | "build" | "card" | "reports" | "market" | "guild" | "atlas";
+type Modal = "none" | "tile" | "city" | "recruit" | "squad" | "build" | "card" | "reports" | "market" | "guild" | "atlas" | "help";
 type RosterTab = "cities" | "people" | "slaves" | "goods" | "marches";
 type BoardCat = "all" | "win" | "lose" | "scout" | "colonize" | "fight" | "reinforce" | "mine" | "join" | "big" | "foot" | "bow" | "horse" | "navy" | "cheap";
 
@@ -38,6 +41,7 @@ function marketBucket(role?: string) {
 }
 
 export function App() {
+  const { t } = useI18n();
   const g = useGame();
   const fileRef = useRef<HTMLInputElement>(null);
   const [modal, setModal] = useState<Modal>("none");
@@ -116,10 +120,16 @@ export function App() {
     () => Object.values(sim.marches).filter((m) => city && m.toX === city.x && m.toY === city.y && m.owner !== g.address),
     [sim.marches, city, g.address],
   );
-  const mineReports = useMemo(
-    () => (sim.reports || []).filter((r) => r.attacker === g.address || r.defender === g.address),
-    [sim.reports, g.address],
-  );
+  const [inbox, setInbox] = useState(() => loadInbox(""));
+  useEffect(() => {
+    if (!g.address) {
+      setInbox([]);
+      return;
+    }
+    const live = (sim.reports || []).filter((r) => r.attacker === g.address || r.defender === g.address);
+    setInbox(mergeInbox(g.address, live));
+  }, [g.address, sim.reports]);
+  const mineReports = inbox;
   const [seenReports, setSeenReports] = useState<Record<string, true>>(() => {
     try {
       return JSON.parse(localStorage.getItem("rexue-chengbang-seen-reports") || "{}") as Record<string, true>;
@@ -152,14 +162,14 @@ export function App() {
     setModal("reports");
   }
 
-  function openBoard(kind: "market" | "guild" | "atlas") {
+  function openBoard(kind: "market" | "guild" | "atlas" | "help") {
     setBoardQ("");
     setBoardCat("all");
     setRosterOpen(false);
     setModal(kind);
   }
 
-  const boardModal = modal === "reports" || modal === "market" || modal === "guild" || modal === "atlas";
+  const boardModal = modal === "reports" || modal === "market" || modal === "guild" || modal === "atlas" || modal === "help";
 
   const filteredReports = useMemo(() => {
     const q = boardQ.trim().toLowerCase();
@@ -226,8 +236,10 @@ export function App() {
     }
     return hits.slice(0, 40);
   }, [boardQ, rosterCities, g.chart]);
-  const busyBuild = Boolean(city && Object.values(city.buildings).some((b) => b?.job));
-  const pendingBuild = g.pending.some((c) => c.kind === "upgrade" && c.cityId === city?.id);
+  const buildSlots = city ? buildSlotsOf(city) : 1;
+  const busyJobs = city ? Object.values(city.buildings).filter((b) => b?.job).length : 0;
+  const pendingBuild = g.pending.filter((c) => c.kind === "upgrade" && c.cityId === city?.id).length;
+  const busyBuild = busyJobs + pendingBuild >= buildSlots;
 
   function toggle(id: string, list: string[], set: (v: string[]) => void) {
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
@@ -293,11 +305,13 @@ export function App() {
         </div>
         <nav className="top-nav">
           <button className="btn tiny" onClick={openReports}>
-            战报{unreadReports.length ? ` ${unreadReports.length}` : ""}
+            {t("reports")}{unreadReports.length ? ` ${unreadReports.length}` : ""}
           </button>
-          <button className="btn tiny" onClick={() => openBoard("market")}>货架</button>
-          <button className="btn tiny" onClick={() => openBoard("guild")}>公会</button>
-          <button className="btn tiny" onClick={() => openBoard("atlas")}>超大地图</button>
+          <button className="btn tiny" onClick={() => openBoard("market")}>{t("market")}</button>
+          <button className="btn tiny" onClick={() => openBoard("guild")}>{t("guild")}</button>
+          <button className="btn tiny" onClick={() => openBoard("atlas")}>{t("atlas")}</button>
+          <button className="btn tiny" onClick={() => openBoard("help")}>{t("help")}</button>
+          <LangSelect compact />
           <button className="btn tiny primary" onClick={() => setRosterOpen((v) => !v)}>
             {rosterOpen ? "收起名册" : "我的名册"}
           </button>
@@ -464,7 +478,7 @@ export function App() {
       {modal !== "none" ? (
         <div className="modal-back" onClick={() => setModal("none")}>
           <div className={boardModal ? "modal board" : "modal"} onClick={(e) => e.stopPropagation()}>
-            <button className="btn tiny modal-x" onClick={() => setModal("none")}>关闭</button>
+            <button className="btn tiny modal-x" onClick={() => setModal("none")}>{t("close")}</button>
             {modal === "tile" && sel ? (
               <>
                 <h3>{sel.x},{sel.y} {tileName(terrainAt(sel.x, sel.y))}</h3>
@@ -557,7 +571,7 @@ export function App() {
             {modal === "build" && city && mine ? (
               <>
                 <h3>建造 · 一块空地一座建筑</h3>
-                {busyBuild || pendingBuild ? <p className="err">本城已有在建或已排队的工程，不能无限排。</p> : null}
+                {busyBuild ? <p className="err">同时在建已满：市政广场允许 {buildSlots} 座（在建 {busyJobs}、已排队 {pendingBuild}）。</p> : null}
                 <p className="muted">
                   空地 {city.plots.filter((p) => p.building).length}/{city.plots.length}
                   {" · "}空闲监工 {idleWorkers(sim, city.id, g.address).length}
@@ -590,7 +604,7 @@ export function App() {
                         {def.name} {lv}级 · 料{cost} · 监工{workers} · 约{sec}秒
                         <div className="muted">{def.blurb}{job ? ` · 在建至${job.to}级 ${remain(job.finishAt, g.now)}` : ""}</div>
                       </div>
-                      <button className="btn tiny" disabled={busyBuild || pendingBuild} onClick={() => {
+                      <button className="btn tiny" disabled={busyBuild} onClick={() => {
                         g.addCommand(makeCommand({
                           kind: "upgrade",
                           label: `建造 ${def.name}（料${cost}/监工${workers}）`,
@@ -608,8 +622,8 @@ export function App() {
 
             {modal === "recruit" && city && mine ? (
               <>
-                <h3>招募 上限 {recruitCapOf(city)}</h3>
-                <p className="muted">奴隶不能招募。用 {SUPPLY_PER_SLAVE} 张本城物资买一张奴隶，或把奴隶转成公民。</p>
+                <h3>招募 总上限 {recruitCapOf(city)}</h3>
+                <p className="muted">奴隶不能招募。用 {SUPPLY_PER_SLAVE} 张本城物资买一张奴隶，或把奴隶转成公民。每种兵由对应建筑等级决定上限；弓手站第二排放箭，但更脆弱。</p>
                 <button className="btn" onClick={() => {
                   g.addCommand(makeCommand({ kind: "buy_slave", label: `买奴隶（耗物资${SUPPLY_PER_SLAVE}）`, cityId: city.id }));
                   setModal("none");
@@ -623,15 +637,22 @@ export function App() {
                     }}>转公民</button>
                   </div>
                 ))}
-                {(Object.keys(ROLES) as RoleId[]).filter((r) => (ROLES[r].kind === "person" && r !== "citizen") || ROLES[r].kind === "ship").map((role) => (
-                  <div className="card" key={role}>
-                    <div>{ROLES[role].name}<small>{ROLES[role].blurb}</small></div>
-                    <button className="btn tiny" onClick={() => {
-                      g.addCommand(makeCommand({ kind: "recruit", label: `招募 ${ROLES[role].name}`, cityId: city.id, role }));
-                      setModal("none");
-                    }}>加入</button>
-                  </div>
-                ))}
+                {(Object.keys(ROLES) as RoleId[]).filter((r) => (ROLES[r].kind === "person" && r !== "citizen") || ROLES[r].kind === "ship").map((role) => {
+                  const cap = roleCapOf(city, role);
+                  const have = roleCountOf(sim, city.id, role);
+                  return (
+                    <div className="card" key={role}>
+                      <div>
+                        {ROLES[role].name}
+                        <small>{ROLES[role].blurb} · {have}/{cap === 99 ? "—" : cap}</small>
+                      </div>
+                      <button className="btn tiny" disabled={cap !== 99 && have >= cap} onClick={() => {
+                        g.addCommand(makeCommand({ kind: "recruit", label: `招募 ${ROLES[role].name}`, cityId: city.id, role }));
+                        setModal("none");
+                      }}>加入</button>
+                    </div>
+                  );
+                })}
               </>
             ) : null}
 
@@ -710,12 +731,12 @@ export function App() {
 
             {modal === "market" ? (
               <>
-                <h3>人物卡货架</h3>
-                <p className="muted">上架免费。成交九成给卖家，一成手续费。可按兵种分类、按名字或卖家检索。</p>
-                <input className="board-search" value={boardQ} onChange={(e) => setBoardQ(e.target.value)} placeholder="搜索卡名、兵种、卖家、价格…" />
+                <h3>{t("marketTitle")}</h3>
+                <p className="muted">{t("marketHint")}</p>
+                <input className="board-search" value={boardQ} onChange={(e) => setBoardQ(e.target.value)} placeholder={t("marketSearch")} />
                 <div className="board-cats">
-                  {([["all", "全部"], ["mine", "我的"], ["foot", "步兵"], ["bow", "弓手"], ["horse", "骑兵"], ["navy", "海军"], ["cheap", "低价"]] as [BoardCat, string][]).map(([id, label]) => (
-                    <button key={id} className={`btn tiny${boardCat === id ? " primary" : ""}`} onClick={() => setBoardCat(id)}>{label}</button>
+                  {([["all", "catAll"], ["mine", "catMine"], ["foot", "catFoot"], ["bow", "catBow"], ["horse", "catHorse"], ["navy", "catNavy"], ["cheap", "catCheap"]] as [BoardCat, "catAll" | "catMine" | "catFoot" | "catBow" | "catHorse" | "catNavy" | "catCheap"][]).map(([id, key]) => (
+                    <button key={id} className={`btn tiny${boardCat === id ? " primary" : ""}`} onClick={() => setBoardCat(id)}>{t(key)}</button>
                   ))}
                 </div>
                 <div className="board-body">
@@ -757,7 +778,7 @@ export function App() {
                           }}>用 AR 购买</button>
                         )}
                       </div>
-                    )) : <p className="muted">没有符合检索的货架。</p>}
+                    )) : <p className="muted">{t("emptyMarket")}</p>}
                   </div>
                 </div>
               </>
@@ -765,12 +786,12 @@ export function App() {
 
             {modal === "guild" ? (
               <>
-                <h3>公会</h3>
-                <p className="muted">共享连通格子。退出后一个月不能加入其他公会。可按名称、会长检索。</p>
-                <input className="board-search" value={boardQ} onChange={(e) => setBoardQ(e.target.value)} placeholder="搜索公会名、会长地址、人数…" />
+                <h3>{t("guildTitle")}</h3>
+                <p className="muted">{t("guildHint")}</p>
+                <input className="board-search" value={boardQ} onChange={(e) => setBoardQ(e.target.value)} placeholder={t("guildSearch")} />
                 <div className="board-cats">
-                  {([["all", "全部"], ["mine", "我的"], ["join", "可加入"], ["big", "大公会"]] as [BoardCat, string][]).map(([id, label]) => (
-                    <button key={id} className={`btn tiny${boardCat === id ? " primary" : ""}`} onClick={() => setBoardCat(id)}>{label}</button>
+                  {([["all", "catAll"], ["mine", "catMine"], ["join", "catJoin"], ["big", "catBig"]] as [BoardCat, "catAll" | "catMine" | "catJoin" | "catBig"][]).map(([id, key]) => (
+                    <button key={id} className={`btn tiny${boardCat === id ? " primary" : ""}`} onClick={() => setBoardCat(id)}>{t(key)}</button>
                   ))}
                 </div>
                 <div className="board-body">
@@ -805,7 +826,7 @@ export function App() {
                           }}>加入</button>
                         )}
                       </div>
-                    )) : <p className="muted">没有符合检索的公会。</p>}
+                    )) : <p className="muted">{t("emptyGuild")}</p>}
                   </div>
                 </div>
               </>
@@ -813,12 +834,12 @@ export function App() {
 
             {modal === "reports" ? (
               <>
-                <h3>军团回报</h3>
-                <p className="muted">派出的人到达后写在这里。可按胜负、任务检索。</p>
-                <input className="board-search" value={boardQ} onChange={(e) => setBoardQ(e.target.value)} placeholder="搜索标题、坐标、阵亡、经过…" />
+                <h3>{t("reportsTitle")}</h3>
+                <p className="muted">{t("reportsHint")}</p>
+                <input className="board-search" value={boardQ} onChange={(e) => setBoardQ(e.target.value)} placeholder={t("reportsSearch")} />
                 <div className="board-cats">
-                  {([["all", "全部"], ["win", "胜利"], ["lose", "失败"], ["fight", "交战"], ["scout", "侦察"], ["colonize", "殖民"], ["reinforce", "增援"]] as [BoardCat, string][]).map(([id, label]) => (
-                    <button key={id} className={`btn tiny${boardCat === id ? " primary" : ""}`} onClick={() => setBoardCat(id)}>{label}</button>
+                  {([["all", "catAll"], ["win", "catWin"], ["lose", "catLose"], ["fight", "catFight"], ["scout", "catScout"], ["colonize", "catColonize"], ["reinforce", "catReinforce"]] as [BoardCat, "catAll" | "catWin" | "catLose" | "catFight" | "catScout" | "catColonize" | "catReinforce"][]).map(([id, key]) => (
+                    <button key={id} className={`btn tiny${boardCat === id ? " primary" : ""}`} onClick={() => setBoardCat(id)}>{t(key)}</button>
                   ))}
                 </div>
                 <div className="board-body">
@@ -830,16 +851,18 @@ export function App() {
                       {r.slaves || r.supplies ? <p>缴获奴隶 {r.slaves || 0} · 物资 {r.supplies || 0}</p> : null}
                       {r.deadNames?.length ? <p className="err">阵亡：{r.deadNames.join("、")}</p> : null}
                     </article>
-                  )) : <p className="muted">{mineReports.length ? "没有符合检索的回报。" : "还没有你的军团回报。"}</p>}
+                  )) : <p className="muted">{mineReports.length ? t("emptyReports") : t("emptyReportsNone")}</p>}
                 </div>
               </>
             ) : null}
 
+            {modal === "help" ? <HelpBoard q={boardQ} onQ={setBoardQ} /> : null}
+
             {modal === "atlas" ? (
               <>
-                <h3>超大地图</h3>
-                <p className="muted">俯视总览。搜海图名、坐标如 0,0，或你的城邦名。</p>
-                <input className="board-search" value={boardQ} onChange={(e) => setBoardQ(e.target.value)} placeholder="搜索海图名、坐标、城邦…" />
+                <h3>{t("atlasTitle")}</h3>
+                <p className="muted">{t("atlasHint")}</p>
+                <input className="board-search" value={boardQ} onChange={(e) => setBoardQ(e.target.value)} placeholder={t("atlasSearch")} />
                 <div className="board-atlas">
                   <div className="board-atlas-list">
                     {atlasHits.map((hit) => (

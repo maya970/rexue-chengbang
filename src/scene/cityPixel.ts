@@ -1,4 +1,5 @@
 import { BUILDINGS } from "../engine/catalog";
+import { u32 } from "../engine/hash";
 import type { BuildingId, PlotKind } from "../types";
 
 const P: Record<string, string> = {
@@ -38,9 +39,10 @@ function sheet() {
 }
 
 function paint(ctx: CanvasRenderingContext2D, rows: string[]) {
-  for (let y = 0; y < rows.length; y += 1) {
-    for (let x = 0; x < rows[y].length; x += 1) {
-      const col = P[rows[y][x]];
+  for (let y = 0; y < CTILE; y += 1) {
+    const row = (rows[y] || "").padEnd(CTILE, ".");
+    for (let x = 0; x < CTILE; x += 1) {
+      const col = P[row[x]];
       if (!col) continue;
       ctx.fillStyle = col;
       ctx.fillRect(x, y, 1, 1);
@@ -228,184 +230,184 @@ const GRASS = [
 
 const HOUSE: Record<string, string[]> = {
   acropolis: [
-    "..y..........y..",
-    ".kkk........kkk.",
-    ".krk.kkkkkk.krk.",
-    ".kkk.kxxxxk.kkk.",
-    ".....kxbbxk.....",
-    ".kkkkkxbbxkkkkk.",
+    "y..............y",
+    "kyk.kkkkkkkk.kyk",
+    "krk.kxxxxrrk.krk",
+    "kkk.kxbbxrrk.kkk",
+    ".kkkkxbbxrrkkkk.",
     ".kxxxkxxxxkxxxk.",
-    ".kxkxkxxxxkxkxk.",
+    ".kxkxkyyyykxkxk.",
     ".kxxxkkkkkkxxxk.",
+    ".kkkkkxbbxkkkkk.",
+    ".kxxxxbbbbxxxxk.",
+    ".kx.x.kkkk.x.xk.",
+    ".kxxxxxxxxxxxxk.",
     ".kkkkkkkkkkkkkk.",
-    "..kxxxxxxxxxxk..",
-    "..kx.x.kk.x.xk..",
-    "..kxxxxxxxxxxk..",
-    "...kkkkkkkkkk...",
-    "....ssssssss....",
-    "................",
+    "..kssssssssssk..",
+    "...sshhhhhhss...",
+    "....hhhhhhhh....",
   ],
   agora: [
-    "................",
     ".kkkkkkkkkkkkkk.",
+    ".kyx.x.x.x.xyk.",
     ".kxxxxxxxxxxxxk.",
-    ".kx.x.x.x.x.xxk.",
-    ".kxxxxxxxxxxxxk.",
-    ".kxkkkkkkkkkkxk.",
-    ".kxkxxxxxxxxkxk.",
-    ".kxkxxkkkkxxkxk.",
-    ".kxkxxxxxxxxkxk.",
-    ".kxkkkkkkkkkkxk.",
+    ".kxAAAAAAAAAAxk.",
+    ".kxA........Axk.",
+    ".kxA.kkkkkk.Axk.",
+    ".kxA.kxxxxk.Axk.",
+    ".kxA.kxkkxk.Axk.",
+    ".kxA.kxxxxk.Axk.",
+    ".kxA.kkkkkk.Axk.",
+    ".kxA........Axk.",
+    ".kxAAAAAAAAAAxk.",
     ".kxxxxxxxxxxxxk.",
     ".kkkkkkkkkkkkkk.",
+    "..ssssssssssss..",
     "....ssssssss....",
-    "................",
-    "................",
-    "................",
   ],
   oikos: [
     "......kkkk......",
     ".....krrrRk.....",
-    "....krrrrrrk....",
-    "...krrrrrrrrk...",
+    "....krrrrrRk....",
+    "...krrrrrrrRk...",
     "..kxxxxxxxxxxk..",
-    "..kx.x.xx.x.xk..",
+    "..kxp.pxxp.pxk..",
     "..kxxxxxxxxxxk..",
-    "..kx.xkxxk.x.k..",
+    "..kxp.kkkk.pxk..",
     "..kxxxxxxxxxxk..",
-    "...kkkkkkkkkk...",
+    "..kkkkkkkkkkkk..",
+    "...hppppppppph..",
+    "...hphphphphph..",
     "....hhhhhhhh....",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
+    "....gghgghgg....",
+    "...gghgghgghg...",
+    "..ghghghghghgh..",
   ],
   barracks: [
-    "................",
-    ".kkkkkkkkkkkkkk.",
-    ".krrrrrrrrrrrrk.",
-    ".kxxxxxxxxxxxxk.",
-    ".kx.kk....kk.xk.",
-    ".kxxxxxxxxxxxxk.",
-    ".kx.kk....kk.xk.",
-    ".kxxxxxxxxxxxxk.",
-    ".kkkkkkkkkkkkkk.",
-    "..ooooooooooo...",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
+    "kkkkkkkkkkkkkkkk",
+    "krrrrrrrrrrrrrrk",
+    "kxxxxxxxxxxxxxxk",
+    "kxkk.ssss.kk.xkk",
+    "kxxxxxxxxxxxxxxk",
+    "kxkk.ssss.kk.xkk",
+    "kxxxxxxxxxxxxxxk",
+    "kx.k.kkkk.k..xkk",
+    "kxxxxxxxxxxxxxxk",
+    "kkkkkkkkkkkkkkkk",
+    ".oooooooooooooo.",
+    ".oAooAooAooAooA.",
+    ".oooooooooooooo.",
+    "..sssskkssss....",
+    "...ssssssss.....",
+    "....oooooooo....",
   ],
   stables: [
-    "................",
-    ".kkkkkkkkkkkkk..",
-    ".koooooooooook..",
-    ".koxx.xx.xx.ok..",
-    ".koooooooooook..",
-    ".koxx.xx.xx.ok..",
-    ".koooooooooook..",
-    ".kkkkkkkkkkkkk..",
-    "..AAaaAAaaAA....",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
+    ".kkkkkkkkkkkkkk.",
+    ".koooooooooook.",
+    ".koA.A.A.A.Aok.",
+    ".koooooooooook.",
+    ".koxx.xx.xx.ok.",
+    ".koooooooooook.",
+    ".koxx.kk.xx.ok.",
+    ".koooooooooook.",
+    ".kkkkkkkkkkkkkk.",
+    "..AAaaAAaaAAaa..",
+    "..aaAAaaAAaaAA..",
+    "..oooooooooooo..",
+    "..o..kkkkkk..o..",
+    "...AAaaAAaaAA...",
+    "....oooooooo....",
+    ".....AAaaAA.....",
   ],
   range: [
-    "................",
     "....kkkkkkkk....",
     "...kddddddddk...",
-    "...kd.d.d.ddk...",
+    "...kd.t.t.tdk...",
     "...kddddddddk...",
-    "...kdkkkkkkdk...",
+    "...kdtkkkktdk...",
     "...kddddddddk...",
-    "....kkkkkkkk....",
-    ".....hhhhhh.....",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
+    "..kkkkkkkkkkkk..",
+    "..khh.tttt.hhk..",
+    "..khhhhhhhhhhk..",
+    "...kkkkkkkkkk...",
+    "....t.t.t.t.....",
+    "....hhhhhhhh....",
+    "...hhgghhgghh...",
+    "..gghgghgghggh..",
+    "...dddddddd.....",
+    "....hhhhhhhh....",
   ],
   wall: [
     "kkkkkkkkkkkkkkkk",
     "kSSSSSSSSSSSSSSk",
-    "kSssSssSssSssSSk",
+    "kSkkSssSssSkkSSk",
     "kSSSSSSSSSSSSSSk",
     "kSssSsskkssSssSk",
     "kSSSSSSSSSSSSSSk",
     "kkkkkkkkkkkkkkkk",
+    "mmSmmSmmSmmSmmSm",
+    "SmmmmSmmmmSmmmmS",
+    "mmSmmkkkkmmSmmmm",
+    "SmmmSSSSSmmmSmmS",
+    "mmSmmSmmSmmSmmmm",
     "....mmmmmmmm....",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
+    "...mmSmmSmmS....",
+    "....mmmmmmmm....",
+    ".....mmmmmm.....",
   ],
   temple: [
     "......y.y.......",
-    ".....kkkkk......",
+    ".....kyyyk......",
     "....kxxxxxk.....",
-    "...kxxxxxxxk....",
+    "...kxxxyxxxk....",
     "..kxxxxxxxxxk...",
     "..kx.x.k.x.xk...",
     "..kxxxxxxxxxk...",
+    "..kxkkkkkkkxk...",
+    "..kxxxxxxxxxk...",
     "...kkkkkkkkk....",
+    "....xhhhhhhx....",
     ".....hhhhh......",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
+    "....hhggghh.....",
+    "...y.hhhhhh.y...",
+    "....hhhhhhhh....",
+    ".....hhhhhh.....",
   ],
   shipyard: [
-    "................",
-    "..kkkkkkkkkkk...",
-    "..kc.c.c.c.ck...",
-    "..kccccccccck...",
-    "..kc.c.c.c.ck...",
-    "..kkkkkkkkkkk...",
-    "...ttttttttt....",
-    "...twwwwwwwt....",
-    "....wwwwwww.....",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
+    "..kkkkkkkkkkkk..",
+    "..kc.c.c.c.c.k..",
+    "..kcccccccccck..",
+    "..kc.c.y.c.c.k..",
+    "..kcccccccccck..",
+    "..kkkkkkkkkkkk..",
+    "...tttttttttt...",
+    "...twwwwwwwwt...",
+    "...twkkkkkkwt...",
+    "...twwwwwwwwt...",
+    "....wwwwwwww....",
+    "....oooooooo....",
+    "...oAoAoAoAoA...",
+    "....wwwwwwww....",
+    "...tttttttttt...",
+    "....wwwwwwww....",
   ],
   harbor: [
     "........y.......",
     ".......kyk......",
     "......kxxxk.....",
     ".....kxxxxxk....",
-    "kkkkkkkkkkkkkkk.",
-    ".kccccccccccck..",
+    "kkkkkkkkkkkkkkkk",
+    "kcccccccccccccck",
+    ".kwwwwywwwwwwk..",
     "..kwwwwwwwwwk...",
-    "...kwwwwwwwk....",
-    "....ooooooo.....",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
+    "...kwwkkwwwk....",
+    "....oooooooo....",
+    "...oAoAoAoAoA...",
+    "....tttttttt....",
+    "...twwwwwwwt....",
+    "....wwwwwwww....",
+    "...oooooooooo...",
+    "....wwwwwwww....",
   ],
 };
 
@@ -478,8 +480,61 @@ export function grassTile() {
   return bake("grass", GRASS);
 }
 
+function generateHouse(id: string): string[] {
+  const rows = Array.from({ length: 16 }, () => Array(16).fill("."));
+  const put = (x: number, y: number, ch: string) => {
+    if (x >= 0 && x < 16 && y >= 0 && y < 16) rows[y][x] = ch;
+  };
+  const h = u32(id);
+  const roof = id === "acropolis" ? "r" : id === "temple" ? "x" : id === "range" ? "d" : id === "stables" ? "o" : id === "shipyard" || id === "harbor" ? "c" : id === "wall" ? "S" : id === "agora" ? "A" : id === "barracks" ? "s" : "R";
+  const wall = id === "harbor" || id === "shipyard" ? "t" : "k";
+  const body = id === "oikos" ? "p" : id === "stables" ? "o" : id === "range" ? "h" : "x";
+  const peak = 2 + (h % 2);
+  for (let y = peak; y < 8; y += 1) {
+    const span = y - peak + 2;
+    for (let x = 8 - span; x < 8 + span; x += 1) put(x, y, roof);
+  }
+  for (let y = 8; y < 14; y += 1) {
+    for (let x = 3; x < 13; x += 1) put(x, y, y === 8 || x === 3 || x === 12 ? wall : body);
+  }
+  put(7, 11, "k");
+  put(8, 11, "k");
+  put(7, 12, "k");
+  put(8, 12, "k");
+  if (id === "acropolis") {
+    put(4, 2, "y");
+    put(11, 2, "y");
+    put(4, 3, "k");
+    put(11, 3, "k");
+  }
+  if (id === "range") {
+    for (let x = 2; x < 14; x += 2) put(x, 6, "t");
+  }
+  if (id === "stables") {
+    put(5, 13, "A");
+    put(10, 13, "A");
+  }
+  if (id === "harbor" || id === "shipyard") {
+    for (let x = 2; x < 14; x += 1) put(x, 14, "w");
+    put(8, 4, "y");
+  }
+  if (id === "wall") {
+    for (let x = 0; x < 16; x += 1) {
+      put(x, 7, "k");
+      put(x, 8, "S");
+      put(x, 9, "s");
+    }
+  }
+  if (id === "temple") {
+    put(5, 5, "y");
+    put(10, 5, "y");
+    put(8, 3, "y");
+  }
+  return rows.map((r) => r.join(""));
+}
+
 export function buildingTile(id: BuildingId) {
-  return bake(`b:${id}`, HOUSE[id] || HOUSE.oikos);
+  return bake(`b:${id}`, HOUSE[id] || generateHouse(id));
 }
 
 export function walkerTile(slave: boolean, frame: number) {

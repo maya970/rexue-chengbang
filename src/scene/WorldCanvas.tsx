@@ -5,6 +5,7 @@ import { posAt } from "../engine/path";
 import type { City, World } from "../types";
 import { overlaySprite, terrainSprite, TILE } from "./feTiles";
 import { drawBlock, drawIsoSprite, inBlock, landDrop, palette, project, textureIsoTop, TH, TW } from "./iso";
+import { MapTools } from "./MapTools";
 
 function kindOf(c: City): "city" | "village" | "tribe" | "ship" {
   if (c.npc) {
@@ -32,6 +33,12 @@ export function WorldCanvas(props: {
   const host = useRef<HTMLDivElement>(null);
   const latest = useRef(props);
   latest.current = props;
+  const camRef = useRef({
+    zoomIn: () => {},
+    zoomOut: () => {},
+    rotate: () => {},
+    reset: () => {},
+  });
 
   useEffect(() => {
     const el = host.current;
@@ -49,11 +56,17 @@ export function WorldCanvas(props: {
     ctx.imageSmoothingEnabled = false;
 
     let zoomAdd = 0;
+    let yaw = 0;
+    let panX = 0;
+    let panY = 0;
     let dragging = false;
     let moved = 0;
     let lastX = 0;
     let lastY = 0;
     let raf = 0;
+    let follow = { x: props.view.x, y: props.view.y, cx: props.chart.cx, cy: props.chart.cy };
+    let lastPush = { x: props.view.x, y: props.view.y };
+    let focus = { x: props.view.x, y: props.view.y };
 
     function resize() {
       const box = host.current;
@@ -74,7 +87,7 @@ export function WorldCanvas(props: {
     function zoomOf() {
       const { cssW, cssH } = viewSize();
       const fit = Math.min(cssW / (CHART * TW * 0.95), cssH / (CHART * TH * 1.2 + 70));
-      return Math.max(0.7, Math.min(2.2, fit + zoomAdd));
+      return Math.max(0.45, Math.min(3.4, fit + zoomAdd));
     }
 
     function originOf() {
@@ -83,15 +96,28 @@ export function WorldCanvas(props: {
 
     function cam() {
       const { view, chart } = latest.current;
+      if (chart.cx !== follow.cx || chart.cy !== follow.cy || Math.hypot(view.x - lastPush.x, view.y - lastPush.y) > 0.6) {
+        follow = { x: view.x, y: view.y, cx: chart.cx, cy: chart.cy };
+        lastPush = { x: view.x, y: view.y };
+        focus = { x: view.x, y: view.y };
+        panX = 0;
+        panY = 0;
+      }
       const { cssW, cssH } = viewSize();
       const zoom = zoomOf();
       const origin = chartOrigin(chart.cx, chart.cy);
       const grid = chartHeights(chart.cx, chart.cy);
-      const lx = view.x - origin.x;
-      const ly = view.y - origin.y;
+      const lx = focus.x - origin.x;
+      const ly = focus.y - origin.y;
       const elev = grid[Math.max(0, Math.min(CHART - 1, Math.floor(ly)))]?.[Math.max(0, Math.min(CHART - 1, Math.floor(lx)))] || 0;
-      const mid = project(lx, ly, elev, 0, 0, zoom);
-      return { cssW, cssH, zoom, ox: cssW / 2 - mid.x, oy: cssH * 0.42 - mid.y, origin, grid };
+      const mid = project(lx, ly, elev, 0, 0, zoom, yaw, CHART, CHART);
+      return { cssW, cssH, zoom, ox: cssW / 2 - mid.x + panX, oy: cssH * 0.42 - mid.y + panY, origin, grid };
+    }
+
+    function pushView(x: number, y: number) {
+      lastPush = { x, y };
+      latest.current.onView(x, y);
+      latest.current = { ...latest.current, view: { x, y } };
     }
 
     function tileAt(px: number, py: number) {
@@ -104,7 +130,7 @@ export function WorldCanvas(props: {
           const se = ly + 1 < CHART ? (grid[ly + 1]?.[lx] ?? 0) : 0;
           const t = terrainAt(origin.x + lx, origin.y + ly);
           const drop = t === "sea" ? 0.25 : landDrop(elev, se);
-          const p = project(lx, ly, t === "sea" ? 0 : elev, ox, oy, zoom);
+          const p = project(lx, ly, t === "sea" ? 0 : elev, ox, oy, zoom, yaw, CHART, CHART);
           if (inBlock(px, py, p.x, p.y, zoom, drop)) return { x: origin.x + lx, y: origin.y + ly };
         }
       }
@@ -129,7 +155,7 @@ export function WorldCanvas(props: {
           const t = terrainAt(tx, ty);
           const elev = t === "sea" ? 0 : (grid[ly]?.[lx] ?? 0);
           const se = ly + 1 < CHART && terrainAt(tx, ty + 1) !== "sea" ? (grid[ly + 1]?.[lx] ?? 0) : 0;
-          const p = project(lx, ly, elev, ox, oy, zoom);
+          const p = project(lx, ly, elev, ox, oy, zoom, yaw, CHART, CHART);
           const spr = terrainSprite(t, tx, ty, frame);
           if (t === "sea") {
             textureIsoTop(ctx, p.x, p.y, zoom, spr, false);
@@ -147,7 +173,7 @@ export function WorldCanvas(props: {
         const ly = Math.floor(c.y - origin.y);
         const t = terrainAt(c.x, c.y);
         const elev = t === "sea" ? 0 : (grid[ly]?.[lx] ?? 0);
-        const q = project(lx, ly, elev, ox, oy, zoom);
+        const q = project(lx, ly, elev, ox, oy, zoom, yaw, CHART, CHART);
         const kind = kindOf(c);
         drawIsoSprite(ctx, q.x, q.y, zoom, overlaySprite(kind), TILE, 0.9);
         if (c.owner === address) {
@@ -162,7 +188,7 @@ export function WorldCanvas(props: {
         const ly = pos.y - origin.y;
         const t = terrainAt(Math.floor(pos.x), Math.floor(pos.y));
         const elev = t === "sea" ? 0 : (grid[Math.floor(ly)]?.[Math.floor(lx)] || 0);
-        const q = project(lx, ly, elev, ox, oy, zoom);
+        const q = project(lx, ly, elev, ox, oy, zoom, yaw, CHART, CHART);
         drawIsoSprite(ctx, q.x, q.y - walk, zoom, overlaySprite("army", walk), TILE, 0.9);
       }
 
@@ -171,7 +197,7 @@ export function WorldCanvas(props: {
         const ly = Math.floor(selected.y - origin.y);
         const t = terrainAt(selected.x, selected.y);
         const elev = t === "sea" ? 0 : (grid[ly]?.[lx] ?? 0);
-        const p = project(lx, ly, elev, ox, oy, zoom);
+        const p = project(lx, ly, elev, ox, oy, zoom, yaw, CHART, CHART);
         ctx.strokeStyle = "#f8f0a8";
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -201,6 +227,7 @@ export function WorldCanvas(props: {
       lastX = ev.clientX;
       lastY = ev.clientY;
       canvas.style.cursor = "grabbing";
+      canvas.setPointerCapture?.(ev.pointerId);
     }
     function onMove(ev: PointerEvent) {
       if (!dragging) return;
@@ -209,16 +236,14 @@ export function WorldCanvas(props: {
       lastX = ev.clientX;
       lastY = ev.clientY;
       moved += Math.abs(dx) + Math.abs(dy);
-      const z = zoomOf();
-      const hw = (TW * z) / 2;
-      const hh = (TH * z) / 2;
-      const a = dx / hw;
-      const b = dy / hh;
+      panX += dx;
+      panY += dy;
+      const { cssW, cssH } = viewSize();
+      const t = tileAt(cssW / 2, cssH / 2);
       const origin = originOf();
-      const nx = Math.min(origin.x + CHART - 2, Math.max(origin.x + 1, latest.current.view.x - (a + b) / 2));
-      const ny = Math.min(origin.y + CHART - 2, Math.max(origin.y + 1, latest.current.view.y - (b - a) / 2));
-      latest.current.onView(nx, ny);
-      latest.current = { ...latest.current, view: { x: nx, y: ny } };
+      const nx = Math.min(origin.x + CHART - 2, Math.max(origin.x + 1, t.x));
+      const ny = Math.min(origin.y + CHART - 2, Math.max(origin.y + 1, t.y));
+      pushView(nx, ny);
     }
     function onUp(ev: PointerEvent) {
       if (!dragging) return;
@@ -237,19 +262,27 @@ export function WorldCanvas(props: {
     }
     function onWheel(ev: WheelEvent) {
       ev.preventDefault();
-      zoomAdd = Math.min(1.2, Math.max(-0.4, zoomAdd - Math.sign(ev.deltaY) * 0.12));
+      zoomAdd = Math.min(2.2, Math.max(-0.85, zoomAdd - Math.sign(ev.deltaY) * 0.14));
     }
+    camRef.current = {
+      zoomIn: () => { zoomAdd = Math.min(2.2, zoomAdd + 0.18); },
+      zoomOut: () => { zoomAdd = Math.max(-0.85, zoomAdd - 0.18); },
+      rotate: () => { yaw = (yaw + 1) & 3; },
+      reset: () => { yaw = 0; zoomAdd = 0; panX = 0; panY = 0; },
+    };
     canvas.addEventListener("pointerdown", onDown);
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointermove", onMove);
+    canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointercancel", onUp);
     canvas.addEventListener("dblclick", onDbl);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener("resize", resize);
     return () => {
       cancelAnimationFrame(raf);
       canvas.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onUp);
       canvas.removeEventListener("dblclick", onDbl);
       canvas.removeEventListener("wheel", onWheel);
       window.removeEventListener("resize", resize);
@@ -261,7 +294,18 @@ export function WorldCanvas(props: {
     latest.current = props;
   });
 
-  return <div className="canvas-host pixel-map" ref={host} title="大地图：像素地块，水面平坦，陆地缓坡连通" />;
+  return (
+    <div className="canvas-host pixel-map" title="拖动平移 · 滚轮缩放 · 转视角">
+      <div className="canvas-fill" ref={host} />
+      <MapTools
+        title="大地图"
+        onZoomIn={() => camRef.current.zoomIn()}
+        onZoomOut={() => camRef.current.zoomOut()}
+        onRotate={() => camRef.current.rotate()}
+        onReset={() => camRef.current.reset()}
+      />
+    </div>
+  );
 }
 
 export function tileHint(x: number, y: number) {

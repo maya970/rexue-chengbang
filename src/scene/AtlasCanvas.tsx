@@ -31,7 +31,7 @@ export function AtlasCanvas(props: {
     let lastX = 0;
     let lastY = 0;
     let raf = 0;
-    const cell = 52;
+    let cell = 52;
 
     function resize() {
       const box = host.current;
@@ -146,15 +146,21 @@ export function AtlasCanvas(props: {
       const t = cellAt(ev.clientX - r.left, ev.clientY - r.top);
       latest.current.onEnter(t.cx, t.cy);
     }
+    function onWheel(ev: WheelEvent) {
+      ev.preventDefault();
+      cell = Math.min(96, Math.max(28, cell - Math.sign(ev.deltaY) * 6));
+    }
     canvas.addEventListener("pointerdown", onDown);
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener("resize", resize);
     return () => {
       cancelAnimationFrame(raf);
       canvas.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("wheel", onWheel);
       window.removeEventListener("resize", resize);
       el.removeChild(canvas);
     };
@@ -167,7 +173,7 @@ export function AtlasCanvas(props: {
   return (
     <div className="atlas-wrap">
       <div className="atlas-label">
-        超大地图（俯视总览，不立体） · {chartName(props.chart.cx, props.chart.cy)} ({props.chart.cx},{props.chart.cy}) · 点一块进入立体大地图
+        超大地图（俯视总览） · 拖动 / 滚轮缩放 · {chartName(props.chart.cx, props.chart.cy)} ({props.chart.cx},{props.chart.cy}) · 点一块进入立体大地图
       </div>
       <div className="canvas-host pixel-map atlas-host" ref={host} />
     </div>

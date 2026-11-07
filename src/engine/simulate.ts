@@ -1,6 +1,6 @@
 import { berthOf, byIds, mintCard, slowest, uniqueId } from "./cards";
 import { AR_FEE_ADDR, BUILDINGS, COLONIZE_COST, MISSION_NAME, ROLES, scaleTime, splitWinston, SUPPLY_PER_SLAVE } from "./catalog";
-import { citizensOf, garrisonPeople, garrisonShips, recruitCapOf, recruitableCount, worksOf } from "./citymath";
+import { buildSlotsOf, citizensOf, garrisonPeople, garrisonShips, recruitCapOf, recruitableCount, roleCapOf, roleCountOf, worksOf } from "./citymath";
 import { resolveFight } from "./combat";
 import { canFound, chartOf, CHART, cityIdAt, isWater, npcAt, npcPower, respawnMs, terrainAt } from "./map";
 import { marchSeconds, planPath, posAt, timeAtIndex } from "./path";
@@ -351,6 +351,7 @@ function fightMarch(world: World, march: March, t: number, dest: City | undefine
     frontage = dest.frontage + Math.floor((dest.buildings.wall?.level || 0) / 3);
   }
   const pos = field ? posAt(march.path, march.startAt, march.arriveAt, t) : { x: march.toX, y: march.toY };
+  const temple = dest && !field ? (dest.buildings.temple?.level || 0) : 0;
   const fight = resolveFight({
     id: field ? `field:${clashKey(march.id, foe?.id || "x", `${pos.x},${pos.y}`)}` : `btl:${march.id}`,
     entropy: march.entropy,
@@ -367,6 +368,7 @@ function fightMarch(world: World, march: March, t: number, dest: City | undefine
     naval: march.naval || Boolean(foe?.naval),
     field,
     warName: field ? "野外遭遇" : MISSION_NAME[march.mission],
+    defHold: temple * 0.04,
   });
   eraseCards(world, fight.dead);
   world.reports.unshift(fight.report);
@@ -863,7 +865,9 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     ensureCityPlots(city);
     if (def.needCoast && !isWater(terrainAt(city.x, city.y))) return skip(world, cmd, "港口与船厂要建在海岸或海域城");
     const cur = city.buildings[bid] || { level: 0, wars: [] };
-    if (Object.values(city.buildings).some((b) => b?.job)) return skip(world, cmd, "本城已有一座建筑在建，不能再排队");
+    const busyJobs = Object.values(city.buildings).filter((b) => b?.job).length;
+    const slots = buildSlotsOf(city);
+    if (busyJobs >= slots) return skip(world, cmd, `同时在建已满（市政广场允许 ${slots} 座）`);
     const plot = findPlotFor(city, bid, cmd.plotId);
     if (!plot) return skip(world, cmd, cur.level < 1 ? "空地不符或已被占用，一块空地只能建一座建筑" : "找不到这座建筑的地块");
     const acro = city.buildings.acropolis?.level || 1;
@@ -898,6 +902,10 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     if (def.needCoast && !isWater(terrainAt(city.x, city.y))) return skip(world, cmd, "舰只与舰长要在海岸或海域城招募");
     if (def.kind !== "ship" && recruitableCount(world, city.id) >= recruitCapOf(city)) {
       return skip(world, cmd, "招募上限已满，上限只由建筑物决定");
+    }
+    const roleCap = roleCapOf(city, role);
+    if (def.capPerLevel && roleCountOf(world, city.id, role) >= roleCap) {
+      return skip(world, cmd, `${def.name} 已满：${BUILDINGS[def.building!].name} ${city.buildings[def.building!]?.level || 0} 级上限 ${roleCap}`);
     }
     const card = mintCard({
       id: uniqueId([batchKey, cmd.id, role, owner]),
@@ -1041,6 +1049,9 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
       return skip(world, cmd, "本城没有这张空闲奴隶卡");
     }
     if (recruitableCount(world, city.id) >= recruitCapOf(city)) return skip(world, cmd, "招募上限已满");
+    if (roleCountOf(world, city.id, "citizen") >= roleCapOf(city, "citizen")) {
+      return skip(world, cmd, `公民已满：民居 ${city.buildings.oikos?.level || 0} 级上限 ${roleCapOf(city, "citizen")}`);
+    }
     slave.kind = "person";
     slave.role = "citizen";
     slave.name = slave.name.replace(/^奴隶·/, "公民·");
@@ -1232,6 +1243,6 @@ export function playerCities(world: World, owner: string): City[] {
   return owned;
 }
 
-export { citizensOf, recruitCapOf, worksOf, garrisonPeople, garrisonShips, MISSION_NAME };
+export { buildSlotsOf, citizensOf, recruitCapOf, roleCapOf, roleCountOf, worksOf, garrisonPeople, garrisonShips, MISSION_NAME };
 export { idleSupply, idleSlaves, idleWorkers, corridorBlocked };
 export { claimsGap, isClaimed, adjacentClaimed, alliesOf } from "./realm";

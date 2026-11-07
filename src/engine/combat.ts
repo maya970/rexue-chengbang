@@ -1,6 +1,7 @@
 import type { BattleReport, BattleRound, Campaign, Card } from "../types";
 import { bitStream } from "./bits";
 import { avgCampaigns, cardLine } from "./cards";
+import { ROLES } from "./catalog";
 
 function killChance(atkCamp: number, defCamp: number): number {
   const raw = 0.5 + (atkCamp - defCamp) * 0.035;
@@ -31,6 +32,8 @@ export interface FightInput {
   naval: boolean;
   field: boolean;
   warName: string;
+  /** 神庙：守军士气更难崩溃。 */
+  defHold?: number;
 }
 
 export interface FightResult {
@@ -48,34 +51,38 @@ function volley(
   title: string,
 ): void {
   if (!atk.length || !def.length) return;
-  const n = Math.min(width, atk.length);
+  const rear = atk.filter((c) => ROLES[c.role]?.rearFire);
+  const front = atk.filter((c) => !ROLES[c.role]?.rearFire);
+  const strikers = [...front.slice(0, width), ...rear.slice(0, width)];
   const hits: string[] = [];
-  for (let i = 0; i < n; i += 1) {
+  for (const striker of strikers) {
     if (!def.length) break;
-    const striker = atk[i];
     const ti = bits.take(8) % def.length;
     const tgt = def[ti];
-    const chance = killChance(striker.campaigns.length, tgt.campaigns.length);
+    const fragile = ROLES[tgt.role]?.fragile ? 1.42 : 1;
+    const chance = Math.min(0.96, killChance(striker.campaigns.length, tgt.campaigns.length) * fragile);
     const roll = bits.frac();
+    const rearNote = ROLES[striker.role]?.rearFire ? "（第二排放箭）" : "";
+    const frailNote = ROLES[tgt.role]?.fragile ? "（弓手更脆弱）" : "";
     if (roll < chance) {
-      hits.push(`${striker.name}击杀${tgt.name}（链上骰 ${roll.toFixed(3)} < ${chance.toFixed(3)}）`);
+      hits.push(`${striker.name}${rearNote}击杀${tgt.name}${frailNote}（链上骰 ${roll.toFixed(3)} < ${chance.toFixed(3)}）`);
       dead.push(tgt);
       def.splice(ti, 1);
     } else {
-      hits.push(`${striker.name}未取${tgt.name}之性命（${roll.toFixed(3)} ≥ ${chance.toFixed(3)}）`);
+      hits.push(`${striker.name}${rearNote}未取${tgt.name}之性命（${roll.toFixed(3)} ≥ ${chance.toFixed(3)}）`);
     }
   }
   rounds.push({
     title,
-    text: `地形宽度 ${width}，本轮 ${n} 人同时出手。${hits.join("；") || "无人出手"}。`,
+    text: `地形宽度 ${width}，前线 ${Math.min(width, front.length)}、第二排弓手 ${Math.min(width, rear.length)} 同时出手。${hits.join("；") || "无人出手"}。`,
   });
 }
 
-function moraleBroke(original: number, remain: Card[], bits: ReturnType<typeof bitStream>): boolean {
+function moraleBroke(original: number, remain: Card[], bits: ReturnType<typeof bitStream>, extraHold = 0): boolean {
   if (!remain.length) return true;
   if (remain.length === original) return false;
   const loss = 1 - remain.length / Math.max(1, original);
-  const hold = holdLine(avgCampaigns(remain));
+  const hold = Math.min(0.94, holdLine(avgCampaigns(remain)) + extraHold);
   if (loss < hold) return false;
   return bits.bit() === 1;
 }
@@ -100,10 +107,11 @@ export function resolveFight(input: FightInput): FightResult {
   const defN0 = def.length + defShips.length;
   let collapsed: "atk" | "def" | undefined;
   const width = Math.max(1, input.frontage);
+  const defHold = Math.max(0, input.defHold || 0);
   let atkTurn = bits.bit() === 1;
   rounds.push({
     title: "先手",
-    text: `用交易熵的第 1 位随机数判定先手：${atkTurn ? "攻方" : "守方"}先手。地形最高宽度 ${width}。攻 ${cardLine(atk)} / 舰 ${cardLine(atkShips)}；守 ${cardLine(def)} / 舰 ${cardLine(defShips)}。士气取在场平均值，战役越多越难崩溃。`,
+    text: `用交易熵的第 1 位随机数判定先手：${atkTurn ? "攻方" : "守方"}先手。地形最高宽度 ${width}。攻 ${cardLine(atk)} / 舰 ${cardLine(atkShips)}；守 ${cardLine(def)} / 舰 ${cardLine(defShips)}。士气取在场平均值，战役越多越难崩溃${defHold ? `。神庙使守军士气 +${defHold.toFixed(2)}` : ""}。`,
   });
 
   if (input.naval) {
@@ -114,7 +122,7 @@ export function resolveFight(input: FightInput): FightResult {
       else volley(defShips, atkShips, width, bits, dead, rounds, `海战第${r}轮·守`);
       atkShips = stripDead(atkShips, dead);
       defShips = stripDead(defShips, dead);
-      if (moraleBroke(input.atkShips.length, atkShips, bits)) {
+      if (moraleBroke(input.atkShips.length, atkShips, bits, 0)) {
         collapsed = "atk";
         rounds.push({ title: "舰队溃散", text: "攻方舰队士气崩溃。运输船不保，名簿落海。" });
         dead.push(...atkShips, ...atk);
@@ -122,7 +130,7 @@ export function resolveFight(input: FightInput): FightResult {
         atk = [];
         break;
       }
-      if (moraleBroke(input.defShips.length, defShips, bits)) {
+      if (moraleBroke(input.defShips.length, defShips, bits, defHold)) {
         collapsed = "def";
         rounds.push({ title: "港口溃散", text: "守方舰队士气崩溃。" });
         dead.push(...defShips);
@@ -146,12 +154,12 @@ export function resolveFight(input: FightInput): FightResult {
       else volley(def, atk, width, bits, dead, rounds, `陆战第${r}轮·守`);
       atk = stripDead(atk, dead);
       def = stripDead(def, dead);
-      if (moraleBroke(input.atkPeople.length, atk, bits)) {
+      if (moraleBroke(input.atkPeople.length, atk, bits, 0)) {
         collapsed = "atk";
         rounds.push({ title: "攻方崩溃", text: `平均战役 ${avgCampaigns(atk).toFixed(1)}，仍未能撑住阵列。` });
         break;
       }
-      if (moraleBroke(input.defPeople.length, def, bits)) {
+      if (moraleBroke(input.defPeople.length, def, bits, defHold)) {
         collapsed = "def";
         rounds.push({ title: "守方崩溃", text: `平均战役 ${avgCampaigns(def).toFixed(1)}，阵列瓦解。` });
         break;

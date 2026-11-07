@@ -79,16 +79,16 @@ export const BUILDINGS: Record<
     needCoast?: boolean;
   }
 > = {
-  acropolis: { name: "卫城", blurb: "城邦心脏。等级上限、名额与成果。", max: 16, baseTime: 48, citizens: 4, recruit: 2, works: 3 },
-  agora: { name: "市政广场", blurb: "缩短建筑与招募时间。", max: 16, baseTime: 36, citizens: 2, recruit: 0, works: 2 },
-  oikos: { name: "民居", blurb: "公民主要来源。", max: 20, baseTime: 16, citizens: 8, recruit: 0, works: 1 },
-  barracks: { name: "兵营", blurb: "招募步兵、轻盾、海军陆战。", max: 16, baseTime: 28, citizens: 1, recruit: 3, works: 2 },
-  stables: { name: "马厩", blurb: "招募骑兵。", max: 16, baseTime: 32, citizens: 1, recruit: 2, works: 2 },
-  range: { name: "弓营", blurb: "招募弓手。", max: 16, baseTime: 28, citizens: 1, recruit: 2, works: 2 },
-  wall: { name: "城墙", blurb: "守城时略增地形宽度。", max: 16, baseTime: 30, citizens: 0, recruit: 0, works: 2 },
-  temple: { name: "神庙", blurb: "铭记战争。每场战役都刻在墙上。", max: 12, baseTime: 34, citizens: 1, recruit: 0, works: 2 },
-  shipyard: { name: "造船厂", blurb: "建造舰只。海岸或海域城才能建。", max: 16, baseTime: 40, citizens: 1, recruit: 2, works: 2, needCoast: true },
-  harbor: { name: "海港", blurb: "没有港口不能出海。海岸或海域城才能建。", max: 12, baseTime: 32, citizens: 2, recruit: 0, works: 2, needCoast: true },
+  acropolis: { name: "卫城", blurb: "专属：其他建筑等级不能超过卫城。并提供总招募名额。", max: 16, baseTime: 48, citizens: 4, recruit: 2, works: 3 },
+  agora: { name: "市政广场", blurb: "专属：每级缩短建造时间 2%；每 4 级多允许一座建筑同时在建。", max: 16, baseTime: 36, citizens: 2, recruit: 0, works: 2 },
+  oikos: { name: "民居", blurb: "专属：公民卡上限，并提供最多公民名额。", max: 20, baseTime: 16, citizens: 8, recruit: 0, works: 1 },
+  barracks: { name: "兵营", blurb: "专属：重装步兵、轻盾兵、海军陆战的人数上限。", max: 16, baseTime: 28, citizens: 1, recruit: 3, works: 2 },
+  stables: { name: "马厩", blurb: "专属：骑兵人数上限。", max: 16, baseTime: 32, citizens: 1, recruit: 2, works: 2 },
+  range: { name: "弓营", blurb: "专属：弓手人数上限。弓手站第二排放箭，但更脆弱。", max: 16, baseTime: 28, citizens: 1, recruit: 2, works: 2 },
+  wall: { name: "城墙", blurb: "专属：守城时增加地形宽度，让更多人同时出手。", max: 16, baseTime: 30, citizens: 0, recruit: 0, works: 2 },
+  temple: { name: "神庙", blurb: "专属：守军更难崩溃；本城战役成果按神庙等级加倍铭记。", max: 12, baseTime: 34, citizens: 1, recruit: 0, works: 2 },
+  shipyard: { name: "造船厂", blurb: "专属：招募舰长、三列桨座、运输船。海岸或海域城才能建。", max: 16, baseTime: 40, citizens: 1, recruit: 2, works: 2, needCoast: true },
+  harbor: { name: "海港", blurb: "专属：没有港口不能出海；等级加快海路行军。海岸或海域城才能建。", max: 12, baseTime: 32, citizens: 2, recruit: 0, works: 2, needCoast: true },
 };
 
 export const ROLES: Record<
@@ -102,19 +102,23 @@ export const ROLES: Record<
     speed: number;
     building?: BuildingId;
     needCoast?: boolean;
+    /** 对应建筑每级可养的本职卡上限。 */
+    capPerLevel?: number;
+    fragile?: boolean;
+    rearFire?: boolean;
   }
 > = {
-  hoplite: { name: "重装步兵", kind: "person", blurb: "没有基础属性。战役越多越强，仍可能死。", time: 16, berth: 1, speed: 8, building: "barracks" },
-  peltast: { name: "轻盾兵", kind: "person", blurb: "行军略快，战斗只看战役履历。", time: 12, berth: 1, speed: 12, building: "barracks" },
-  toxotes: { name: "弓手", kind: "person", blurb: "从弓营招募。", time: 14, berth: 1, speed: 10, building: "range" },
-  hippeus: { name: "骑兵", kind: "person", blurb: "陆上最快。", time: 20, berth: 2, speed: 18, building: "stables" },
-  epibatai: { name: "海军陆战", kind: "person", blurb: "登陆与跳帮。兵营可训，出海再登船。", time: 18, berth: 1, speed: 9, building: "barracks" },
-  trierarch: { name: "舰长", kind: "person", blurb: "战船护航需要舰长。", time: 22, berth: 1, speed: 9, building: "shipyard", needCoast: true },
-  citizen: { name: "公民", kind: "person", blurb: "由奴隶转正。占招募名额，可监工、可上阵。", time: 14, berth: 1, speed: 8, building: "oikos" },
+  hoplite: { name: "重装步兵", kind: "person", blurb: "前线宽度内出手。兵营等级决定人数上限。", time: 16, berth: 1, speed: 8, building: "barracks", capPerLevel: 5 },
+  peltast: { name: "轻盾兵", kind: "person", blurb: "行军略快。兵营等级决定人数上限。", time: 12, berth: 1, speed: 12, building: "barracks", capPerLevel: 5 },
+  toxotes: { name: "弓手", kind: "person", blurb: "站第二排，按地形宽度放箭，但更脆弱。弓营等级决定上限。", time: 14, berth: 1, speed: 10, building: "range", capPerLevel: 4, fragile: true, rearFire: true },
+  hippeus: { name: "骑兵", kind: "person", blurb: "陆上最快。马厩等级决定人数上限。", time: 20, berth: 2, speed: 18, building: "stables", capPerLevel: 3 },
+  epibatai: { name: "海军陆战", kind: "person", blurb: "登陆与跳帮。兵营等级决定上限。", time: 18, berth: 1, speed: 9, building: "barracks", capPerLevel: 4 },
+  trierarch: { name: "舰长", kind: "person", blurb: "战船护航需要舰长。造船厂等级决定上限。", time: 22, berth: 1, speed: 9, building: "shipyard", needCoast: true, capPerLevel: 2 },
+  citizen: { name: "公民", kind: "person", blurb: "由奴隶转正。民居等级决定公民上限。", time: 14, berth: 1, speed: 8, building: "oikos", capPerLevel: 6 },
   slave: { name: "奴隶", kind: "slave", blurb: "不能招募。只能战斗抓获，或用本城物资卡买。可转公民、可上阵。", time: 10, berth: 1, speed: 7 },
   supply: { name: "物资", kind: "supply", blurb: "劫掠与屠城获得。本城买奴隶，也可折成建造材料。", time: 0, berth: 0, speed: 0 },
-  trireme: { name: "三列桨座", kind: "ship", blurb: "海战与护航。", time: 36, berth: 4, speed: 16, building: "shipyard", needCoast: true },
-  transport: { name: "运输船", kind: "ship", blurb: "载人过海。船没则人没。", time: 24, berth: 8, speed: 12, building: "shipyard", needCoast: true },
+  trireme: { name: "三列桨座", kind: "ship", blurb: "海战与护航。造船厂等级决定舰只上限。", time: 36, berth: 4, speed: 16, building: "shipyard", needCoast: true, capPerLevel: 2 },
+  transport: { name: "运输船", kind: "ship", blurb: "载人过海。船没则人没。造船厂等级决定上限。", time: 24, berth: 8, speed: 12, building: "shipyard", needCoast: true, capPerLevel: 3 },
 };
 
 export const MISSION_NAME: Record<import("../types").MarchMission, string> = {

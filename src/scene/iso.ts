@@ -10,10 +10,33 @@ export function landDrop(elev: number, southElev: number) {
   return Math.max(0.35, elev - southElev);
 }
 
-export function project(lx: number, ly: number, elev: number, ox: number, oy: number, scale: number) {
+/** yaw: 0 east, 1 south, 2 west, 3 north. Rotates the grid, not the camera roll. */
+export function rotateCell(lx: number, ly: number, yaw: number, w: number, h: number) {
+  const mx = w - 1;
+  const my = h - 1;
+  switch (yaw & 3) {
+    case 1: return { x: my - ly, y: lx };
+    case 2: return { x: mx - lx, y: my - ly };
+    case 3: return { x: ly, y: mx - lx };
+    default: return { x: lx, y: ly };
+  }
+}
+
+export function project(
+  lx: number,
+  ly: number,
+  elev: number,
+  ox: number,
+  oy: number,
+  scale: number,
+  yaw = 0,
+  gw = 1,
+  gh = 1,
+) {
+  const r = yaw ? rotateCell(lx, ly, yaw, gw, gh) : { x: lx, y: ly };
   return {
-    x: (lx - ly) * (TW / 2) * scale + ox,
-    y: (lx + ly) * (TH / 2) * scale - elev * TZ * scale + oy,
+    x: (r.x - r.y) * (TW / 2) * scale + ox,
+    y: (r.x + r.y) * (TH / 2) * scale - elev * TZ * scale + oy,
   };
 }
 
