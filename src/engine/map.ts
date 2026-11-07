@@ -28,7 +28,7 @@ export function chartOrigin(cx: number, cy: number) {
 }
 
 export function chartCenter(cx: number, cy: number) {
-  return { x: cx * CHART + (CHART - 1) / 2, y: cy * CHART + (CHART - 1) / 2 };
+  return { x: cx * CHART + Math.floor(CHART / 2), y: cy * CHART + Math.floor(CHART / 2) };
 }
 
 export function islandCount(cx: number, cy: number): 1 | 2 {

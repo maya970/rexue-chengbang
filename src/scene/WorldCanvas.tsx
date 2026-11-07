@@ -7,8 +7,9 @@ import { drawBlock, inBlock, palette, project, TH, TW } from "./iso";
 
 function kindOf(c: City): "city" | "village" | "tribe" | "ship" {
   if (c.npc) {
-    if (c.owner.includes("pirate")) return "ship";
-    if (c.owner.includes("polis")) return "city";
+    const who = c.owner || "";
+    if (who.includes("pirate")) return "ship";
+    if (who.includes("polis")) return "city";
     if ((c.tribeLevel || 1) <= 3) return "village";
     return "tribe";
   }
@@ -131,8 +132,8 @@ export function WorldCanvas(props: {
           const tx = origin.x + lx;
           const ty = origin.y + ly;
           const t = terrainAt(tx, ty);
-          const elev = grid[ly][lx];
-          const se = ly + 1 < CHART ? grid[ly + 1][lx] : 0;
+          const elev = grid[ly]?.[lx] ?? 0;
+          const se = ly + 1 < CHART ? (grid[ly + 1]?.[lx] ?? 0) : 0;
           const drop = t === "sea" ? 1 : Math.max(1, elev - se + 1);
           const p = project(lx, ly, elev, ox, oy, zoom);
           const pal = palette(t, frame);
@@ -150,9 +151,9 @@ export function WorldCanvas(props: {
 
       for (const c of Object.values(world.cities)) {
         if (c.x < origin.x || c.y < origin.y || c.x >= origin.x + CHART || c.y >= origin.y + CHART) continue;
-        const lx = c.x - origin.x;
-        const ly = c.y - origin.y;
-        const elev = grid[ly][lx];
+        const lx = Math.floor(c.x - origin.x);
+        const ly = Math.floor(c.y - origin.y);
+        const elev = grid[ly]?.[lx] ?? 0;
         const mark = MARK[kindOf(c)];
         const q = project(lx, ly, elev + 2, ox, oy, zoom);
         drawBlock(ctx, q.x, q.y, zoom, 2, mark.top, mark.left, mark.right);
@@ -173,9 +174,9 @@ export function WorldCanvas(props: {
       }
 
       if (selected && selected.x >= origin.x && selected.y >= origin.y && selected.x < origin.x + CHART && selected.y < origin.y + CHART) {
-        const lx = selected.x - origin.x;
-        const ly = selected.y - origin.y;
-        const p = project(lx, ly, grid[ly][lx], ox, oy, zoom);
+        const lx = Math.floor(selected.x - origin.x);
+        const ly = Math.floor(selected.y - origin.y);
+        const p = project(lx, ly, grid[ly]?.[lx] ?? 0, ox, oy, zoom);
         ctx.strokeStyle = "#f8f0a8";
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -190,7 +191,11 @@ export function WorldCanvas(props: {
 
     const loop = () => {
       raf = requestAnimationFrame(loop);
-      draw();
+      try {
+        draw();
+      } catch {
+        /* keep HUD up if a frame fails */
+      }
     };
     resize();
     loop();

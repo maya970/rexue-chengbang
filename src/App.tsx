@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BUILDINGS, COLONIZE_COST, MISSION_NAME, PLOT_NAME, PLOT_TIME, ROLES, scaleTime, SUPPLY_PER_SLAVE } from "./engine/catalog";
 import { chartName, chartOf, cityIdAt, npcAt, terrainAt, tileName } from "./engine/map";
 import { planPath } from "./engine/path";
@@ -83,6 +83,38 @@ export function App() {
     () => Object.values(sim.marches).filter((m) => city && m.toX === city.x && m.toY === city.y && m.owner !== g.address),
     [sim.marches, city, g.address],
   );
+  const mineReports = useMemo(
+    () => (sim.reports || []).filter((r) => r.attacker === g.address || r.defender === g.address),
+    [sim.reports, g.address],
+  );
+  const [seenReports, setSeenReports] = useState<Record<string, true>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("rexue-chengbang-seen-reports") || "{}") as Record<string, true>;
+    } catch {
+      return {};
+    }
+  });
+  const unreadReports = mineReports.filter((r) => !seenReports[r.id]);
+  const [toast, setToast] = useState<(typeof mineReports)[0] | null>(null);
+
+  useEffect(() => {
+    const latest = unreadReports[0];
+    if (!latest) return;
+    setToast(latest);
+    const t = window.setTimeout(() => setToast(null), 8000);
+    return () => window.clearTimeout(t);
+  }, [unreadReports[0]?.id]);
+
+  function openReports() {
+    const next = { ...seenReports };
+    for (const r of mineReports) next[r.id] = true;
+    setSeenReports(next);
+    try {
+      localStorage.setItem("rexue-chengbang-seen-reports", JSON.stringify(next));
+    } catch { /* ignore */ }
+    setToast(null);
+    setModal("reports");
+  }
   const busyBuild = Boolean(city && Object.values(city.buildings).some((b) => b?.job));
   const pendingBuild = g.pending.some((c) => c.kind === "upgrade" && c.cityId === city?.id);
 
@@ -148,7 +180,9 @@ export function App() {
           <span>完全免费 · 游戏内钱包 · 操作都在游戏里</span>
         </div>
         <nav className="top-nav">
-          <button className="btn tiny" onClick={() => setModal("reports")}>战报</button>
+          <button className="btn tiny" onClick={openReports}>
+            战报{unreadReports.length ? ` ${unreadReports.length}` : ""}
+          </button>
           <button className="btn tiny" onClick={() => setModal("market")}>货架</button>
           <button className="btn tiny" onClick={() => setModal("guild")}>公会</button>
           <button className="btn tiny primary" onClick={() => setRosterOpen((v) => !v)}>
@@ -310,6 +344,14 @@ export function App() {
             </div>
           </aside>
         ) : null}
+
+      {toast ? (
+        <button className="report-toast" onClick={openReports}>
+          <b>军团回报</b> {toast.win ? "成功" : "失败"} · {toast.title}
+          {toast.slaves || toast.supplies ? ` · 奴隶${toast.slaves || 0} 物资${toast.supplies || 0}` : ""}
+          {toast.deadNames?.length ? ` · 阵亡${toast.deadNames.length}` : ""}
+        </button>
+      ) : null}
 
       {modal !== "none" ? (
         <div className="modal-back" onClick={() => setModal("none")}>
@@ -629,15 +671,17 @@ export function App() {
 
             {modal === "reports" ? (
               <>
-                <h3>战报</h3>
-                {sim.reports.slice(0, 12).map((r) => (
+                <h3>军团回报</h3>
+                <p className="muted">派出的人到达后会写进这里：胜负、阵亡、奴隶、物资、殖民成败。</p>
+                {mineReports.length ? mineReports.slice(0, 20).map((r) => (
                   <article key={r.id} className="report">
-                    <h4>{r.title} ({r.x},{r.y})</h4>
-                    {r.rounds.slice(0, 4).map((round, i) => <p key={i}><b>{round.title}</b> {round.text}</p>)}
-                    {r.deadNames.length ? <p className="muted">消失：{r.deadNames.join("、")}</p> : null}
+                    <h4>{r.win ? "成" : "败"} · {r.title} ({r.x},{r.y})</h4>
+                    <p className="muted">{new Date(r.time).toLocaleString()}{r.aftermath ? ` · ${MISSION_NAME[r.aftermath]}` : ""}</p>
+                    {(r.rounds || []).map((round, i) => <p key={i}><b>{round.title}</b> {round.text}</p>)}
+                    {r.slaves || r.supplies ? <p>缴获奴隶 {r.slaves || 0} · 物资 {r.supplies || 0}</p> : null}
+                    {r.deadNames?.length ? <p className="err">阵亡：{r.deadNames.join("、")}</p> : null}
                   </article>
-                ))}
-                {sim.skipped.slice(-5).map((s) => <p className="muted" key={s}>{s}</p>)}
+                )) : <p className="muted">还没有你的军团回报。</p>}
               </>
             ) : null}
           </div>

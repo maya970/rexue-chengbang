@@ -28,8 +28,36 @@ function emptyWorld(): World {
   };
 }
 
+function hydrateWorld(world: World): World {
+  world.cities ||= {};
+  world.cards ||= {};
+  world.squads ||= {};
+  world.marches ||= {};
+  world.listings ||= {};
+  world.reports ||= [];
+  world.skipped ||= [];
+  world.resolvedClash ||= {};
+  world.gone ||= {};
+  world.raidDone ||= {};
+  world.spentPays ||= {};
+  ensureGuildState(world);
+  for (const r of world.reports) {
+    r.rounds ||= [];
+    r.deadNames ||= [];
+  }
+  for (const city of Object.values(world.cities)) {
+    city.owner ||= "";
+    city.name ||= "无名";
+    city.buildings ||= {};
+    city.plots ||= [];
+    city.wars ||= [];
+    city.buildMult ||= {};
+  }
+  return world;
+}
+
 function cloneWorld(w: World): World {
-  return JSON.parse(JSON.stringify(w)) as World;
+  return hydrateWorld(JSON.parse(JSON.stringify(w || {})) as World);
 }
 
 function markWar(city: City | undefined, war: Campaign) {
@@ -448,8 +476,24 @@ function resolveArrival(world: World, march: March, t: number) {
   }
 
   if (march.mission === "reinforce") {
-    if (dest && dest.owner === march.owner) parkAt(world, still, dest);
+    const ownCity = dest && dest.owner === march.owner ? dest : undefined;
+    if (ownCity) parkAt(world, still, ownCity);
     else returnHome(world, still, origin?.id);
+    world.reports.unshift({
+      id: `rf:${march.id}`,
+      time: t,
+      title: ownCity ? "增援抵达" : "增援折返",
+      attacker: march.owner,
+      defender: dest?.name || "途中",
+      x: march.toX,
+      y: march.toY,
+      naval: march.naval,
+      field: false,
+      win: Boolean(ownCity),
+      rounds: [{ title: "回报", text: ownCity ? `${still.length} 人进入 ${ownCity.name}。` : "目标不是自己的城，军团已返回出发城。" }],
+      deadNames: [],
+      aftermath: "reinforce",
+    });
     delete world.marches[march.id];
     return;
   }
@@ -458,6 +502,21 @@ function resolveArrival(world: World, march: March, t: number) {
     if (!canFound(terrainAt(march.toX, march.toY)) || (world.gone[cityIdAt(march.toX, march.toY)]?.respawnAt || 0) > t) {
       returnHome(world, still, origin?.id);
       world.skipped.push(`${march.id}:殖民地点不可建城`);
+      world.reports.unshift({
+        id: `colfail:${march.id}`,
+        time: t,
+        title: "殖民失败",
+        attacker: march.owner,
+        defender: "荒野",
+        x: march.toX,
+        y: march.toY,
+        naval: march.naval,
+        field: false,
+        win: false,
+        rounds: [{ title: "回报", text: "此地不能建城，军团已返回出发城。" }],
+        deadNames: [],
+        aftermath: "colonize",
+      });
       delete world.marches[march.id];
       return;
     }
@@ -500,12 +559,41 @@ function resolveArrival(world: World, march: March, t: number) {
 
   if (!dest) {
     returnHome(world, still, origin?.id);
+    world.reports.unshift({
+      id: `empty:${march.id}`,
+      time: t,
+      title: `${MISSION_NAME[march.mission]}无果`,
+      attacker: march.owner,
+      defender: "荒野",
+      x: march.toX,
+      y: march.toY,
+      naval: march.naval,
+      field: false,
+      win: false,
+      rounds: [{ title: "回报", text: `目标格没有城。${still.length} 人已返回出发城。` }],
+      deadNames: [],
+      aftermath: march.mission,
+    });
     delete world.marches[march.id];
     return;
   }
 
   if (dest.owner === march.owner) {
     parkAt(world, still, dest);
+    world.reports.unshift({
+      id: `home:${march.id}`,
+      time: t,
+      title: "军团入城",
+      attacker: march.owner,
+      defender: dest.name,
+      x: march.toX,
+      y: march.toY,
+      naval: march.naval,
+      field: false,
+      win: true,
+      rounds: [{ title: "回报", text: `${still.length} 人进入自己的 ${dest.name}。` }],
+      deadNames: [],
+    });
     delete world.marches[march.id];
     return;
   }
@@ -516,6 +604,7 @@ function resolveArrival(world: World, march: March, t: number) {
     if (world.cities[dest.id]) applyAftermath(world, march, dest, t, soldiers);
   } else {
     returnHome(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), origin?.id);
+    fight.report.rounds.push({ title: "回报", text: "失利，幸存者已返回出发城。" });
   }
   delete world.marches[march.id];
 }

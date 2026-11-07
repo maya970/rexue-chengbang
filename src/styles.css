@@ -207,6 +207,13 @@ h1, h2, .cinzel {
 .qitem button { float: right; }
 .legend { font-size: 12px; opacity: 0.75; }
 
+.report-toast {
+  position: fixed; right: 16px; bottom: 188px; z-index: 18;
+  max-width: min(420px, 92vw); text-align: left;
+  background: #1a120e; color: var(--parchment); border: 1px solid var(--bronze);
+  padding: 10px 12px; cursor: pointer; font-size: 13px;
+}
+.report-toast b { color: #f3d9a0; margin-right: 8px; }
 .report { border-bottom: 1px solid var(--line); padding: 8px 0; font-size: 13px; }
 .report h4 { margin: 0 0 4px; color: #f3d9a0; font-size: 14px; }
 .muted { opacity: 0.65; font-size: 12px; }
