@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta http-equiv="refresh" content="12;url=https://cdn.jsdmirror.com/gh/maya970/rexue-chengbang@web/index.html"/>
+<title>热血城邦</title>
+<style>
+body{margin:0;background:#1a140c;color:#f3e6c4;font:16px/1.5 sans-serif;padding:28px}
+a{color:#e8c36a;word-break:break-all}
+h1{font-size:20px}
+</style>
+</head>
+<body>
+<h1>热血城邦</h1>
+<p>正在挑选可打开的入口… 游戏本体在镜像上，不经过 GitHub 也能玩。</p>
+<p id="list"></p>
+<script>
+var M=["https://cdn.jsdmirror.com/gh/maya970/rexue-chengbang@web/index.html","https://cdn.jsdmirror.cn/gh/maya970/rexue-chengbang@web/index.html","https://testingcf.jsdelivr.net/gh/maya970/rexue-chengbang@web/index.html","https://fastly.jsdelivr.net/gh/maya970/rexue-chengbang@web/index.html","https://gcore.jsdelivr.net/gh/maya970/rexue-chengbang@web/index.html","https://cdn.jsdelivr.net/gh/maya970/rexue-chengbang@web/index.html","https://jsd.onmicrosoft.cn/gh/maya970/rexue-chengbang@web/index.html","https://cdn.statically.io/gh/maya970/rexue-chengbang/web/index.html","https://ghproxy.net/https://maya970.github.io/rexue-chengbang/","https://gh.ddlc.top/https://maya970.github.io/rexue-chengbang/","https://maya970.github.io/rexue-chengbang/"];
+var box=document.getElementById("list");
+for(var i=0;i<M.length;i++){
+  var a=document.createElement("a");
+  a.href=M[i]; a.textContent=M[i];
+  box.appendChild(a); box.appendChild(document.createElement("br"));
+}
+(async function(){
+  for(var i=0;i<M.length;i++){
+    try{
+      var r=await fetch(M[i],{cache:"no-store",mode:"cors"});
+      if(r.ok){location.replace(M[i]);return;}
+    }catch(e){}
+  }
+  location.replace(M[0]);
+})();
+</script>
+</body>
+</html>

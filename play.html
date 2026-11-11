@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>热血城邦 · 入口</title>
+<style>
+body{margin:0;background:#1a140c;color:#f3e6c4;font:16px/1.5 sans-serif;padding:24px 28px 64px}
+a{color:#e8c36a;word-break:break-all}
+h1{font-size:22px} h2{font-size:16px;margin-top:28px}
+.muted{color:#b9a57a;font-size:14px}
+</style>
+</head>
+<body>
+<h1>热血城邦入口</h1>
+<p class="muted">游戏本体在镜像上，不经过 GitHub 也能玩。下面任意链接点开即可。网关列表会从 AR.IO 实时拉取。</p>
+<h2>镜像</h2>
+<p id="mirrors"></p>
+<h2>免费 AR.IO 网关</h2>
+<p class="muted" id="count">正在读取网关名录…</p>
+<p id="gates"></p>
+<script>
+var TX="awLIQudxnnLBbCDaOBByjkSe2WW0yxtZ7Kcfl0kTo4g";
+var M=[
+  "https://cdn.jsdmirror.com/gh/maya970/rexue-chengbang@web/index.html",
+  "https://cdn.jsdmirror.cn/gh/maya970/rexue-chengbang@web/index.html",
+  "https://testingcf.jsdelivr.net/gh/maya970/rexue-chengbang@web/index.html",
+  "https://fastly.jsdelivr.net/gh/maya970/rexue-chengbang@web/index.html",
+  "https://gcore.jsdelivr.net/gh/maya970/rexue-chengbang@web/index.html",
+  "https://cdn.jsdelivr.net/gh/maya970/rexue-chengbang@web/index.html",
+  "https://jsd.onmicrosoft.cn/gh/maya970/rexue-chengbang@web/index.html",
+  "https://cdn.statically.io/gh/maya970/rexue-chengbang/web/index.html",
+  "https://ghproxy.net/https://maya970.github.io/rexue-chengbang/",
+  "https://maya970.github.io/rexue-chengbang/",
+  "https://maya970.github.io/rexue-chengbang/play.html",
+  "https://cdn.jsdmirror.com/gh/maya970/rexue-chengbang@web/play.html"
+];
+var box=document.getElementById("mirrors");
+M.forEach(function(u){var a=document.createElement("a");a.href=u;a.textContent=u;box.appendChild(a);box.appendChild(document.createElement("br"));});
+var seeds=["https://ardrive.net","https://turbo-gateway.com","https://frostor.xyz","https://arweave.fllstck.dev"];
+(async function(){
+  var urls=[];
+  for(var i=0;i<seeds.length;i++){
+    try{
+      var r=await fetch(seeds[i]+"/ar-io/peers",{cache:"no-store"});
+      if(!r.ok) continue;
+      var j=await r.json();
+      if(j.self&&j.self.url) urls.push(j.self.url.replace(/\/$/,""));
+      var gw=j.gateways||{};
+      var list=Array.isArray(gw)?gw:Object.keys(gw).map(function(k){return gw[k];});
+      list.forEach(function(g){ if(g&&g.url&&g.status!=="leaving") urls.push(String(g.url).replace(/\/$/,"")); });
+      if(urls.length) break;
+    }catch(e){}
+  }
+  urls=urls.filter(function(u,i,a){return u.indexOf("https://")===0 && a.indexOf(u)===i;});
+  document.getElementById("count").textContent=urls.length+" 条免费网关，同一启动页 "+TX;
+  var gbox=document.getElementById("gates");
+  urls.forEach(function(o){
+    var u=o+"/"+TX;
+    var a=document.createElement("a"); a.href=u; a.textContent=u;
+    gbox.appendChild(a); gbox.appendChild(document.createElement("br"));
+  });
+})();
+</script>
+</body>
+</html>
