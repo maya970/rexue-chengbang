@@ -44,8 +44,8 @@ export function drawCityMark(ctx: CanvasRenderingContext2D, x: number, y: number
   const kind = markKind(city);
   const spr = settleSprite(kind);
   if (spr) {
-    const width = kind === "village" || kind === "barbarian" ? 0.78 : kind === "pirate" ? 0.86 : 0.9;
-    plantSprite(ctx, spr, x, y, scale, { width, flip: (yaw & 1) === 1, foot: 0.94 });
+    const width = kind === "pirate" ? 0.98 : 1;
+    plantSprite(ctx, spr, x, y, scale, { width, flip: (yaw & 1) === 1, foot: 1 });
     return;
   }
   if (kind === "barbarian") {
@@ -68,7 +68,7 @@ export function drawBuildingMark(
   const spr = buildingSprite(id);
   if (spr) {
     const width = 0.92 + Math.min(0.28, level * 0.04);
-    plantSprite(ctx, spr, x, y, scale, { width, flip: (yaw & 1) === 1, foot: 0.94 });
+    plantSprite(ctx, spr, x, y, scale, { width, flip: (yaw & 1) === 1, foot: 1 });
     return;
   }
   const pal = HOUSE_PAL[id] || CITY_PAL;
@@ -79,7 +79,7 @@ export function drawBuildingMark(
 export function drawBarbarianMark(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number) {
   const spr = settleSprite("barbarian");
   if (spr) {
-    plantSprite(ctx, spr, x, y, scale, { width: 0.8, foot: 0.94 });
+    plantSprite(ctx, spr, x, y, scale, { width: 1, foot: 1 });
     return;
   }
   const s = scale;

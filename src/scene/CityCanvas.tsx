@@ -256,6 +256,11 @@ export function CityCanvas(props: {
         {" · "}
         {BUILDINGS.acropolis.name}
         {" · "}点空地建造
+        {Object.entries(props.city.buildings).map(([bid, b]) => b?.job ? (
+          <div key={bid} className="build-eta-line">
+            {BUILDINGS[bid as BuildingId].name} →{b.job.to}级 · 剩余 {Math.max(0, Math.ceil((b.job.finishAt - props.now) / 1000))}秒
+          </div>
+        ) : null)}
       </div>
     </div>
   );

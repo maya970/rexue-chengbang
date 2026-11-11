@@ -56,7 +56,8 @@ export type CommandKind =
   | "create_guild"
   | "join_guild"
   | "leave_guild"
-  | "upgrade_site";
+  | "upgrade_site"
+  | "rename_city";
 
 export type MarchMission = "plunder" | "massacre" | "destroy" | "occupy" | "reinforce" | "colonize" | "scout" | "settle";
 

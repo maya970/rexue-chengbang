@@ -1471,6 +1471,15 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
   if (cmd.kind === "leave_guild") {
     const err = leaveGuild(world, owner, t);
     if (err) return skip(world, cmd, err);
+    return;
+  }
+
+  if (cmd.kind === "rename_city") {
+    if (!city || city.owner !== owner) return skip(world, cmd, "城邦不属于你");
+    if (city.npc) return skip(world, cmd, "不能给敌对聚落改名");
+    const name = (cmd.name || "").replace(/\s+/g, " ").trim().slice(0, 16);
+    if (name.length < 1) return skip(world, cmd, "名字不能为空");
+    city.name = name;
   }
 }
 

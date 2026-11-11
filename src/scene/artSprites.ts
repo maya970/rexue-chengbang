@@ -12,9 +12,10 @@ let buildReady = false;
 let npcReady = false;
 
 function isMagenta(r: number, g: number, b: number, a: number) {
-  if (a < 8) return true;
+  if (a < 16) return true;
   const mag = (r + b) / 2 - g;
-  return mag > 50 && g < 160 && r > 80 && b > 80;
+  if (mag > 24 && r > 70 && b > 70 && g < 200) return true;
+  return r > 170 && b > 140 && g > 70 && g < 210 && r - g > 20 && b - g > 12;
 }
 
 function keyedImage(img: HTMLImageElement) {
@@ -29,7 +30,7 @@ function keyedImage(img: HTMLImageElement) {
     if (isMagenta(d[i], d[i + 1], d[i + 2], d[i + 3])) d[i + 3] = 0;
   }
   ctx.putImageData(im, 0, 0);
-  return { c, d, w: c.width, h: c.height };
+  return { c, d: ctx.getImageData(0, 0, c.width, c.height).data, w: c.width, h: c.height };
 }
 
 function crop(src: HTMLCanvasElement, x0: number, y0: number, x1: number, y1: number) {
@@ -39,6 +40,87 @@ function crop(src: HTMLCanvasElement, x0: number, y0: number, x1: number, y1: nu
   out.width = w;
   out.height = h;
   out.getContext("2d")!.drawImage(src, x0, y0, w, h, 0, 0, w, h);
+  return trimAlpha(out);
+}
+
+function trimAlpha(src: HTMLCanvasElement, cut = 36) {
+  const ctx = src.getContext("2d");
+  if (!ctx) return src;
+  const w = src.width;
+  const h = src.height;
+  const d = ctx.getImageData(0, 0, w, h).data;
+  let x0 = w;
+  let y0 = h;
+  let x1 = 0;
+  let y1 = 0;
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      if (d[(y * w + x) * 4 + 3] < cut) continue;
+      if (x < x0) x0 = x;
+      if (y < y0) y0 = y;
+      if (x > x1) x1 = x;
+      if (y > y1) y1 = y;
+    }
+  }
+  if (x1 < x0 || y1 < y0) return src;
+  return cropRaw(src, x0, y0, x1, y1);
+}
+
+function cropRaw(src: HTMLCanvasElement, x0: number, y0: number, x1: number, y1: number) {
+  const w = x1 - x0 + 1;
+  const h = y1 - y0 + 1;
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  out.getContext("2d")!.drawImage(src, x0, y0, w, h, 0, 0, w, h);
+  return out;
+}
+
+type PlantMetrics = { south: number; waist: number };
+
+const METRICS = new WeakMap<CanvasImageSource, PlantMetrics>();
+
+function metricsOf(img: CanvasImageSource): PlantMetrics {
+  const hit = METRICS.get(img);
+  if (hit) return hit;
+  const fallback = { south: 1, waist: 0.72 };
+  if (!(img instanceof HTMLCanvasElement)) {
+    METRICS.set(img, fallback);
+    return fallback;
+  }
+  const ctx = img.getContext("2d");
+  if (!ctx) {
+    METRICS.set(img, fallback);
+    return fallback;
+  }
+  const w = img.width;
+  const h = img.height;
+  const d = ctx.getImageData(0, 0, w, h).data;
+  const minA = 40;
+  let south = h - 1;
+  let foundSouth = false;
+  let waist = 0;
+  let waistY = Math.floor(h * 0.72);
+  const tip = 2;
+  for (let y = h - 1; y >= 0; y -= 1) {
+    let n = 0;
+    for (let x = 0; x < w; x += 1) {
+      if (d[(y * w + x) * 4 + 3] > minA) n += 1;
+    }
+    if (!foundSouth && n >= tip) {
+      south = y;
+      foundSouth = true;
+    }
+    if (n > waist) {
+      waist = n;
+      waistY = y;
+    }
+  }
+  const out = {
+    south: (south + 1) / Math.max(1, h),
+    waist: (waistY + 0.5) / Math.max(1, h),
+  };
+  METRICS.set(img, out);
   return out;
 }
 
@@ -155,18 +237,16 @@ export function plantSprite(
   scale: number,
   opts?: { width?: number; flip?: boolean; foot?: number },
 ) {
-  const tw = (opts?.width ?? 0.88) * 40 * scale;
+  const tw = (opts?.width ?? 1) * 40 * scale;
   const iw = "width" in img ? Number(img.width) : tw;
   const ih = "height" in img ? Number(img.height) : tw;
   const h = tw * (ih / Math.max(1, iw));
-  const foot = (opts?.foot ?? 0.92) * 20 * scale;
-  const dy = y + foot - h;
+  const m = metricsOf(img);
+  const th = 20 * scale;
+  const targetSouth = y + th * (opts?.foot ?? 1);
+  const dy = targetSouth - h * m.south;
   ctx.save();
   ctx.imageSmoothingEnabled = true;
-  ctx.fillStyle = "rgba(18,10,6,0.32)";
-  ctx.beginPath();
-  ctx.ellipse(x, y + foot, tw * 0.26, 3.2 * scale, 0, 0, Math.PI * 2);
-  ctx.fill();
   if (opts?.flip) {
     ctx.translate(x, 0);
     ctx.scale(-1, 1);

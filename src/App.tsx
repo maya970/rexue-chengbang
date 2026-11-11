@@ -16,6 +16,7 @@ import { makeCommand, statusLabel } from "./lib/cmd";
 import { shortAddr } from "./lib/wallet";
 import { AtlasCanvas } from "./scene/AtlasCanvas";
 import { CityCanvas } from "./scene/CityCanvas";
+import { EmpireHud } from "./scene/EmpireHud";
 import { WorldCanvas } from "./scene/WorldCanvas";
 import type { BuildingId, MarchMission, RoleId } from "./types";
 
@@ -42,6 +43,7 @@ export function App() {
   const [pickedP, setPickedP] = useState<string[]>([]);
   const [pickedS, setPickedS] = useState<string[]>([]);
   const [cityName, setCityName] = useState("新城邦");
+  const [renameDraft, setRenameDraft] = useState("");
   const [mission, setMission] = useState<MarchMission>("plunder");
   const [buildId, setBuildId] = useState<BuildingId>("oikos");
   const [cardId, setCardId] = useState<string>("");
@@ -74,6 +76,9 @@ export function App() {
 
   const sim = g.sim;
   const city = g.activeCity;
+  useEffect(() => {
+    if (city?.name) setRenameDraft(city.name);
+  }, [city?.id, city?.name]);
   const origin = g.myCities.find((c) => c.id === fromCityId) || g.myCities[0] || null;
   const mine = Boolean(city && g.address && city.owner === g.address);
   const here = city && mine
@@ -303,6 +308,7 @@ export function App() {
           {inside ? <button className="btn tiny" onClick={() => setInside(false)}>回到大地图</button> : null}
           {inside && mine ? (
             <>
+              <button className="btn tiny" onClick={() => setModal("city")}>城邦 / 改名</button>
               <button className="btn tiny primary" onClick={() => setModal("recruit")}>招募人物卡</button>
               <button className="btn tiny" onClick={() => { setPlotId(""); setModal("build"); }}>建造</button>
             </>
@@ -320,7 +326,7 @@ export function App() {
           }} />
           {g.address ? (
             <>
-              <span className="muted">{shortAddr(g.address)} · 本城 人{peopleN} 奴{slaveN} 物资{goods.length} 城{Math.max(g.myCities.length, rosterCities.length)}</span>
+              <span className="muted">{shortAddr(g.address)}</span>
               <button className="btn" onClick={g.doExport}>导出钱包</button>
               <button className="btn" onClick={g.logout}>退出</button>
             </>
@@ -334,6 +340,16 @@ export function App() {
       </header>
 
       <div className="stage">
+        {g.address ? (
+          <EmpireHud
+            address={g.address}
+            city={mine ? city : undefined}
+            world={sim}
+            now={g.now}
+            pending={g.pending}
+            onOpenCity={() => { if (city && mine) setModal("city"); }}
+          />
+        ) : null}
         {inside && city && mine ? (
           <CityCanvas
             city={city}
@@ -539,7 +555,14 @@ export function App() {
                   </>
                 ) : null}
                 {ownSel ? (
-                  <button className="btn" onClick={() => enterOwnCity(selCity!.id)}>{isHamlet(selCity!) ? "进入乡村" : "进入城市"}</button>
+                  <div className="row">
+                    <button className="btn" onClick={() => enterOwnCity(selCity!.id)}>{isHamlet(selCity!) ? "进入乡村" : "进入城市"}</button>
+                    <button className="btn primary" onClick={() => {
+                      g.setFocusCityId(selCity!.id);
+                      setRenameDraft(selCity!.name);
+                      setModal("city");
+                    }}>城邦详情 / 改名</button>
+                  </div>
                 ) : null}
                 {origin && sel ? (
                   <>
@@ -589,6 +612,15 @@ export function App() {
             {modal === "city" && city && mine ? (
               <>
                 <h3>{city.name} · {hamletLabel(hamletOf(city))} LV.{city.buildings.acropolis?.level || 1}{city.peakLevel && city.peakLevel > (city.buildings.acropolis?.level || 1) ? ` (曾${city.peakLevel})` : ""}</h3>
+                <div className="row rename-row">
+                  <input maxLength={16} value={renameDraft} onChange={(e) => setRenameDraft(e.target.value)} placeholder="城邦之名" />
+                  <button className="btn primary" disabled={!renameDraft.trim() || renameDraft.trim() === city.name} onClick={() => {
+                    const name = renameDraft.trim().slice(0, 16);
+                    g.addCommand(makeCommand({ kind: "rename_city", cityId: city.id, name, label: `改名 ${city.name} → ${name}` }));
+                    setModal("none");
+                  }}>改名</button>
+                </div>
+                <p className="muted">改名写入指令队列，点底部「执行指令」后生效。限 16 字。</p>
                 <p>公民 {citizensOf(city, sim)} · 军队编制 {peopleN}/{recruitCapOf(city)}（出征、驻村仍占名额） · 成果 {worksOf(city, sim)} · 本城奴隶 {slaveN} · 物资 {goods.length}</p>
                 {isHamlet(city) ? (
                   <p className="muted">
@@ -634,6 +666,16 @@ export function App() {
               <>
                 <h3>建造 · 一块空地一座建筑</h3>
                 {busyBuild ? <p className="err">同时在建已满：市政广场允许 {buildSlots} 座（在建 {busyJobs}、已排队 {pendingBuild}）。</p> : null}
+                {Object.entries(city.buildings).filter(([, b]) => b?.job).length ? (
+                  <div className="build-eta">
+                    {Object.entries(city.buildings).map(([bid, b]) => b?.job ? (
+                      <div key={bid}>
+                        <b>{BUILDINGS[bid as BuildingId].name}</b> 升至 {b.job.to} 级
+                        {" · "}还剩 <em>{remain(b.job.finishAt, g.now)}</em>
+                      </div>
+                    ) : null)}
+                  </div>
+                ) : <p className="muted">当前没有正在建造的队列。开工后顶部会显示剩余秒数。</p>}
                 <p className="muted">
                   空地 {city.plots.filter((p) => p.building).length}/{city.plots.length}
                   {" · "}空闲监工 {idleWorkers(sim, city.id, g.address).length}
@@ -664,7 +706,10 @@ export function App() {
                     <div className="bld" key={bid}>
                       <div>
                         {def.name} {lv}级 · 料{cost} · 监工{workers} · 约{sec}秒
-                        <div className="muted">{def.blurb}{job ? ` · 在建至${job.to}级 ${remain(job.finishAt, g.now)}` : ""}</div>
+                        <div className={job ? "build-eta-line" : "muted"}>
+                          {def.blurb}
+                          {job ? ` · 在建至${job.to}级，剩余 ${remain(job.finishAt, g.now)}` : ""}
+                        </div>
                       </div>
                       <button className="btn tiny" disabled={busyBuild} onClick={() => {
                         g.addCommand(makeCommand({
