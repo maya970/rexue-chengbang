@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { childrenOf, displayLevel, hamletOf, isHamlet, ownerColor } from "../engine/hamlets";
+import { displayLevel, hamletOf, isHamlet, linkedChildrenOf, ownerColor } from "../engine/hamlets";
 import { chartHeights } from "../engine/height";
 import { chartOrigin, CHART, cityIdAt, npcAt, terrainAt } from "../engine/map";
 import { posAt } from "../engine/path";
@@ -216,7 +216,7 @@ export function WorldCanvas(props: {
       if (viewMode === "realm") {
         for (const c of Object.values(world.cities)) {
           if (isHamlet(c)) continue;
-          const kids = childrenOf(world, c.id);
+          const kids = linkedChildrenOf(world, c);
           const hue = ((c.x * 13 + c.y * 29) % 360 + 360) % 360;
           for (const k of kids) {
             if (k.x < origin.x || k.y < origin.y || k.x >= origin.x + CHART || k.y >= origin.y + CHART) continue;

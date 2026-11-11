@@ -49,12 +49,38 @@ export function hamletLabel(kind: HamletKind) {
 
 export function childrenOf(world: World, cityId: string) {
   const parent = world.cities[cityId];
-  return Object.values(world.cities).filter((c) => c.parentId === cityId && (!parent || c.owner === parent.owner));
+  return Object.values(world.cities).filter((c) => c.parentId === cityId && (!parent || c.owner === parent.owner) && isHamlet(c));
+}
+
+/** 与城邦城域相连的附属乡村：从城格一圈圈邻接，中间被拆或占走则外圈不算。 */
+export function linkedChildrenOf(world: World, city: City) {
+  if (isHamlet(city)) return [];
+  const kids = childrenOf(world, city.id);
+  const linked: City[] = [];
+  const seen = new Set<string>();
+  const seed = kids.filter((c) => ringDist(city.x, city.y, c.x, c.y) === 1);
+  const q = [...seed];
+  for (const c of seed) seen.add(c.id);
+  while (q.length) {
+    const cur = q.shift()!;
+    linked.push(cur);
+    for (const n of kids) {
+      if (seen.has(n.id)) continue;
+      if (ringDist(cur.x, cur.y, n.x, n.y) !== 1) continue;
+      seen.add(n.id);
+      q.push(n);
+    }
+  }
+  return linked;
+}
+
+export function inCityRealm(world: World, city: City, hamlet: City) {
+  return linkedChildrenOf(world, city).some((c) => c.id === hamlet.id);
 }
 
 export function cityLevelCap(world: World, city: City) {
   if (isHamlet(city)) return 4;
-  const bonus = childrenOf(world, city.id).reduce((n, c) => {
+  const bonus = linkedChildrenOf(world, city).reduce((n, c) => {
     const k = hamletOf(c);
     if (k === "city") return n;
     return n + HAMLET_UNLOCK[k];
@@ -72,12 +98,12 @@ export function canFoundVillage(world: World, owner: string, parent: City, x: nu
   const r = ringDist(parent.x, parent.y, x, y);
   if (r < 1) return "不能叠在城上";
   if (r === 1) return null;
-  const kids = childrenOf(world, parent.id);
+  const kids = linkedChildrenOf(world, parent);
   const ok = kids.some((c) => {
     const cr = ringDist(parent.x, parent.y, c.x, c.y);
     return cr === r - 1 && ringDist(c.x, c.y, x, y) === 1;
   });
-  if (!ok) return `须先在第${r - 1}圈建连通乡村，才能向外扩到第${r}圈`;
+  if (!ok) return `须先在第${r - 1}圈与城域相连的乡村，才能向外扩到第${r}圈`;
   return null;
 }
 

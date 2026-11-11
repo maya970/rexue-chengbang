@@ -15,7 +15,6 @@ import {
   SITE_UPGRADE,
 } from "./hamlets";
 import {
-  adjacentClaimed,
   alliesOf,
   claimOwner,
   claimTile,
@@ -23,8 +22,11 @@ import {
   createGuild,
   ensureGuildState,
   ensureSystemNear,
+  isAllyClaim,
+  isPlayerClaim,
   joinGuild,
   leaveGuild,
+  unclaimTile,
 } from "./realm";
 import { buildMultAt, empireTimeFactor, frontageAt, slaveCostFor, workersFor } from "./site";
 import { u32 } from "./hash";
@@ -116,6 +118,7 @@ function makeNpcCity(world: World, x: number, y: number, garrison = false) {
   const site = npcAt(x, y);
   if (!site) return;
   const id = cityIdAt(x, y);
+  if (isPlayerClaim(world, x, y) && !world.cities[id]?.npc) return;
   if (world.cities[id]?.systemRank) {
     if (garrison) fillNpcGarrison(world, world.cities[id]);
     return;
@@ -372,14 +375,29 @@ function corridorBlocked(world: World, tiles: { x: number; y: number }[], owner:
     if (p.x === destX && p.y === destY) continue;
     const c = cityAt(world, p.x, p.y);
     if (c && !friends.has(c.owner)) {
-      return isHamlet(c)
-        ? `路上有敌方乡村 ${c.name} (${p.x},${p.y})，须先占领或毁灭才能开路，劫掠不能拆掉它`
-        : `路上有敌方城邦 ${c.name} (${p.x},${p.y})，须先占领或毁灭`;
+      return c.npc
+        ? `路上有野蛮人 ${c.name} (${p.x},${p.y})，须先进攻清理才能连通`
+        : isHamlet(c)
+          ? `路上有敌方乡村 ${c.name} (${p.x},${p.y})，须先占领或毁灭才能开路，劫掠不能拆掉它`
+          : `路上有敌方城邦 ${c.name} (${p.x},${p.y})，须先占领或毁灭`;
     }
-    const who = claimOwner(world, p.x, p.y);
-    if (who && !friends.has(who)) return `路上格子 (${p.x},${p.y}) 仍属他人，须先侦察抢格开路`;
+    if (terrainAt(p.x, p.y) === "sea") continue;
+    if (!isAllyClaim(world, owner, p.x, p.y)) {
+      return `须从已连通邻格一格格推进 (${p.x},${p.y})。公会成员的连通可共享`;
+    }
   }
   return null;
+}
+
+function stripEmptyClaimsAround(world: World, x: number, y: number) {
+  for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    const tx = x + dx;
+    const ty = y + dy;
+    if (!isPlayerClaim(world, tx, ty)) continue;
+    const c = cityAt(world, tx, ty);
+    if (c && !c.npc) continue;
+    unclaimTile(world, tx, ty);
+  }
 }
 
 function damageBuildings(city: City, want: number, soldiers: number, citizens: number, bitsWant: number) {
@@ -478,6 +496,10 @@ function applyAftermath(world: World, march: March, dest: City, t: number, soldi
     world.reports[0].supplies = supplies;
     world.reports[0].aftermath = "plunder";
     world.reports[0].rounds.push({ key: "plunder", params: { slaves, supplies, hurt }, title: "劫掠", text: `带走奴隶卡 ${slaves}、物资卡 ${supplies}。因兵民悬殊，只毁去 ${hurt} 级建筑。城未易主。` });
+    if (march.owner.startsWith("npc:")) {
+      stripEmptyClaimsAround(world, dest.x, dest.y);
+      world.reports[0].rounds.push({ key: "barbCut", params: {}, title: "切断连通", text: "野蛮人扫过周边空地，已连通的格子被切断，之后可能在未连通处刷新。" });
+    }
     returnHome(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), origin?.id);
     return;
   }
@@ -557,7 +579,7 @@ function resolveArrival(world: World, march: March, t: number) {
     const taken = claimOwner(world, march.toX, march.toY);
     let grabbed = false;
     if (!dest && terrainAt(march.toX, march.toY) !== "sea") {
-      grabbed = claimTile(world, march.owner, march.toX, march.toY, true);
+      grabbed = isAllyClaim(world, march.owner, march.toX, march.toY) || claimTile(world, march.owner, march.toX, march.toY, true);
     }
     const scoutKey = dest
       ? "scoutCity"
@@ -776,6 +798,28 @@ function resolveArrival(world: World, march: March, t: number) {
   }
 
   if (!dest) {
+    if (march.owner.startsWith("npc:") && isPlayerClaim(world, march.toX, march.toY)) {
+      unclaimTile(world, march.toX, march.toY);
+      returnHome(world, still, origin?.id);
+      world.reports.unshift({
+        id: `barbcut:${march.id}`,
+        time: t,
+        title: "野蛮人切断连通",
+        code: "barbCut",
+        attacker: march.owner,
+        defender: "__wild__",
+        x: march.toX,
+        y: march.toY,
+        naval: march.naval,
+        field: false,
+        win: true,
+        rounds: [{ key: "barbCut", params: {}, title: "切断连通", text: "未连通格子上的野蛮人冲进你的连通空地，此格连通已丢失。野蛮人仍会从没有连通的格子刷新。" }],
+        deadNames: [],
+        aftermath: "plunder",
+      });
+      delete world.marches[march.id];
+      return;
+    }
     returnHome(world, still, origin?.id);
     world.reports.unshift({
       id: `empty:${march.id}`,
@@ -803,10 +847,10 @@ function resolveArrival(world: World, march: March, t: number) {
     returnHome(world, still, origin?.id);
     world.reports.unshift({
       id: `ally:${march.id}`,
-      time: t,
+    time: t,
       title: dest.owner === march.owner ? "不能攻击自己" : "不能攻击公会",
       code: dest.owner === march.owner ? "noSelf" : "noGuild",
-      attacker: march.owner,
+    attacker: march.owner,
       defender: dest.name,
       x: march.toX,
       y: march.toY,
@@ -911,6 +955,24 @@ function nearestPlayerCity(world: World, x: number, y: number): City | undefined
   return best;
 }
 
+function pickNpcRaidTarget(world: World, origin: City): { x: number; y: number } | undefined {
+  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+  const empty: { x: number; y: number }[] = [];
+  const cities: { x: number; y: number }[] = [];
+  for (const [dx, dy] of dirs) {
+    const x = origin.x + dx;
+    const y = origin.y + dy;
+    if (!isPlayerClaim(world, x, y)) continue;
+    const c = cityAt(world, x, y);
+    if (c && !c.npc) cities.push({ x, y });
+    else empty.push({ x, y });
+  }
+  if (empty.length) return empty.sort((a, b) => a.x - b.x || a.y - b.y)[0];
+  if (cities.length) return cities.sort((a, b) => a.x - b.x || a.y - b.y)[0];
+  const city = nearestPlayerCity(world, origin.x, origin.y);
+  return city ? { x: city.x, y: city.y } : undefined;
+}
+
 function incomingNpcCount(world: World, x: number, y: number) {
   return Object.values(world.marches).filter((m) => m.toX === x && m.toY === y && m.owner.startsWith("npc:")).length;
 }
@@ -930,11 +992,12 @@ function spawnNpcRaids(world: World, from: number, t: number) {
     const key = `${origin.id}:${slot}`;
     if (world.raidDone[key]) continue;
     world.raidDone[key] = true;
-    const target = nearestPlayerCity(world, origin.x, origin.y);
+    const target = pickNpcRaidTarget(world, origin);
     if (!target) continue;
+    const destCity = cityAt(world, target.x, target.y);
     const dist = Math.hypot(origin.x - target.x, origin.y - target.y);
     if (dist > 18) continue;
-    if (start < target.foundedAt + 240000) continue;
+    if (destCity && !destCity.npc && start < destCity.foundedAt + 240000) continue;
     if (incomingNpcCount(world, target.x, target.y) >= 2) continue;
     const crew = garrisonPeople(world, origin.id).sort((a, b) => a.id.localeCompare(b.id));
     const ships = garrisonShips(world, origin.id);
@@ -979,6 +1042,10 @@ function respawnTribes(world: World, t: number) {
     const x = Number(xs);
     const y = Number(ys);
     if (!Number.isFinite(x)) continue;
+    if (isPlayerClaim(world, x, y) || (cityAt(world, x, y) && !cityAt(world, x, y)!.npc)) {
+      g.respawnAt = t + respawnMs(g.level || 1);
+      continue;
+    }
     delete world.gone[id];
     makeNpcCity(world, x, y);
   }
@@ -1254,10 +1321,8 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     makeNpcCity(world, cmd.toX!, cmd.toY!, true);
     const path = planPath(city.x, city.y, cmd.toX!, cmd.toY!, ships.length > 0);
     if (!path.ok) return skip(world, cmd, path.reason || "无法通行");
-    if (cmd.mission !== "scout") {
-      const blocked = corridorBlocked(world, path.tiles, owner, cmd.toX!, cmd.toY!);
-      if (blocked) return skip(world, cmd, blocked);
-    }
+    const blocked = corridorBlocked(world, path.tiles, owner, cmd.toX!, cmd.toY!);
+    if (blocked) return skip(world, cmd, blocked);
     if (cmd.mission === "colonize" || cmd.mission === "settle") {
       if (!canColonize(terrainAt(cmd.toX!, cmd.toY!))) return skip(world, cmd, "海域不能建城或建村，请选海岸或陆地");
       const who = claimOwner(world, cmd.toX!, cmd.toY!);

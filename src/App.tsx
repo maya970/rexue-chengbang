@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BUILDINGS, COLONIZE_COST, MISSION_NAME, PLOT_NAME, PLOT_TIME, ROLES, scaleTime, SUPPLY_PER_SLAVE } from "./engine/catalog";
-import { canFoundVillage, childrenOf, cityLevelCap, hamletLabel, hamletOf, isHamlet, SITE_UPGRADE } from "./engine/hamlets";
+import { canFoundVillage, childrenOf, cityLevelCap, hamletLabel, hamletOf, inCityRealm, isHamlet, linkedChildrenOf, SITE_UPGRADE } from "./engine/hamlets";
 import { canColonize, chartName, chartOf, cityIdAt, npcAt, terrainAt, tileName } from "./engine/map";
 import { planPath } from "./engine/path";
 import { canBuildOn, plotTimeMult } from "./engine/plots";
 import { empireTimeFactor, slaveCostFor, workersFor } from "./engine/site";
-import { adjacentClaimed, claimOwner, claimsGap, isClaimed } from "./engine/realm";
+import { claimOwner, claimsGap, isAllyClaim, isClaimed } from "./engine/realm";
 import { alliesOf, buildSlotsOf, citizensOf, corridorBlocked, homeOf, idleSlaves, idleSupply, idleWorkers, recruitCapOf, roleCapOf, roleCountOf, worksOf } from "./engine/simulate";
 import { loadInbox, mergeInbox } from "./lib/inbox";
 import { HelpBoard } from "./i18n/HelpBoard";
@@ -90,9 +90,9 @@ export function App() {
   const sel = g.selected;
   const selCity = sel ? sim.cities[cityIdAt(sel.x, sel.y)] : undefined;
   const ownSel = Boolean(selCity && g.address && selCity.owner === g.address);
-  const selNpc = sel && !selCity ? npcAt(sel.x, sel.y) : null;
+  const selNpc = sel && !selCity && !claimOwner(sim, sel.x, sel.y) ? npcAt(sel.x, sel.y) : null;
   const path = origin && sel ? planPath(origin.x, origin.y, sel.x, sel.y, true) : null;
-  const blocked = origin && path?.ok && mission !== "scout"
+  const blocked = origin && path?.ok
     ? corridorBlocked(sim, path.tiles, g.address, sel!.x, sel!.y)
     : null;
   const claimMiss = origin && path?.ok && sel && (mission === "colonize" || mission === "settle")
@@ -479,11 +479,11 @@ export function App() {
                     {selCity.systemRank ? " 可占领、劫掠、屠城，不能毁灭。" : ""}
                   </p>
                 ) : selNpc ? (
-                  <p>{selNpc.name} 固定在这格刷新，不会搬家。等级 {selNpc.level}。未攻下前看不到里面的人。打下来后这格才算连通。</p>
+                  <p>{selNpc.name} 等级 {selNpc.level}。须进攻清理才能连通这一格。连通过的格子不再刷新野蛮人；未连通的格子还会刷，并会切断你的连通。</p>
                 ) : (
                   <p>
                     {g.myCities.length
-                      ? `这是抢格子的游戏。侦察可夺他人空地（海域不行）；已有城邦或乡村的格子必须直接进攻。侦察敌方乡村会抢劫该村。开辟独立城邦与修建附属乡村是两回事。出征、驻村的人仍占出发城编制，不能空出名额再招。`
+                      ? `必须从已连通邻格一格格推进，公会成员的连通可共享。路上的野蛮人要先打掉。连通过的格子不再刷新野蛮人；未连通处仍会刷，并可能切断你的连通。`
                       : terrainAt(sel.x, sel.y) === "sea"
                         ? "第一座城可以建在海域，建成海港城，自带港口、船厂和运输船。"
                         : terrainAt(sel.x, sel.y) === "mountain"
@@ -494,18 +494,22 @@ export function App() {
                 {g.address && sel ? (
                   <p className="muted">
                     {selCity
-                      ? isHamlet(selCity)
+                      ? selCity.npc
+                        ? "野蛮人聚落：须进攻占领或毁灭才能连通，侦察不能夺格。"
+                        : isHamlet(selCity)
                         ? selCity.owner === g.address
                           ? "这是你的附属乡村，可增援驻军。要占地须进攻别人的乡村。"
                           : "敌方乡村：侦察会抢劫；占地请直接进攻占领。"
                         : "已有城邦，侦察只能探听，占地必须进攻。"
                       : terrainAt(sel.x, sel.y) === "sea"
-                        ? "海域不能抢格"
+                        ? "海域不能抢格，海路可过，不必连通海域格。"
                         : isClaimed(sim, g.address, sel.x, sel.y)
-                          ? "此格已是你的连通"
-                          : claimOwner(sim, sel.x, sel.y)
-                            ? "他人空地：侦察可抢夺此格"
-                            : "无主空地：侦察可夺下此格"}
+                          ? "此格已是你的连通，野蛮人不会在此刷新。"
+                          : isAllyClaim(sim, g.address, sel.x, sel.y)
+                            ? "公会成员已连通，你可共享，不必再抢。"
+                            : claimOwner(sim, sel.x, sel.y)
+                              ? "他人空地：须从你或公会的连通邻格侦察抢下。"
+                              : "无主空地：须与已连通格子相邻，侦察一格格夺下。"}
                   </p>
                 ) : null}
                 {path?.ok ? <p className="muted">{path.naval ? "海路" : "陆路"} {path.dist} 格</p> : path && !path.ok ? <p className="err">{path.reason}</p> : null}
@@ -557,7 +561,7 @@ export function App() {
                           return true;
                         }).map((m) => <option key={m} value={m}>{MISSION_NAME[m]}</option>)}
                       </select>
-                      <button className="btn primary" onClick={() => setModal("squad")} disabled={(Boolean(blocked) && mission !== "scout") || Boolean(claimMiss) || Boolean(villageMiss) || seaColonize || friendlyFire}>挑选将士出征</button>
+                      <button className="btn primary" onClick={() => setModal("squad")} disabled={Boolean(blocked) || Boolean(claimMiss) || Boolean(villageMiss) || seaColonize || friendlyFire}>挑选将士出征</button>
                     </div>
                     {mission === "scout" && selCity && isHamlet(selCity) && selCity.owner !== g.address ? (
                       <p className="err">侦察敌方乡村会抢劫该村，不能夺格。要占地请改占领或屠城。</p>
@@ -568,8 +572,11 @@ export function App() {
                     {mission === "colonize" ? <p className="muted">开辟的是独立城邦，不是乡村。</p> : null}
                     {mission === "settle" ? <p className="muted">修建的是附属乡村，归 {origin.name} 所有，一圈圈外扩。</p> : null}
                     {mission === "reinforce" ? <p className="muted">增援可把军队驻进自己的城或乡村。编制仍算出发城，不会空出名额。</p> : null}
+                    {mission === "scout" && !selCity ? (
+                      <p className="muted">侦察只能夺与已连通邻接的空地。公会连通可共享。路上有野蛮人须先进攻清理。</p>
+                    ) : null}
                     {mission === "occupy" || mission === "destroy" || mission === "massacre" || mission === "plunder" ? (
-                      <p className="muted">进攻须先侦察抢走路上空地。挡路的乡村要占领或毁灭，劫掠不能开路。要留下城请用占领或屠城；毁灭会抹掉玩家城。</p>
+                      <p className="muted">须沿已连通格子推进。挡路的野蛮人、乡村要占领或毁灭，劫掠不能开路。要留下城请用占领或屠城。</p>
                     ) : null}
                     <p className="muted">当前从 {origin.name} 出发，此地可派 {originPeople.filter((c) => !c.jobId).length} 人。</p>
                   </>
@@ -584,16 +591,22 @@ export function App() {
                 {isHamlet(city) ? (
                   <p className="muted">
                     附属 {sim.cities[city.parentId || ""]?.name || "城邦"}。
+                    {city.parentId && sim.cities[city.parentId] && !inCityRealm(sim, sim.cities[city.parentId], city)
+                      ? "未与该城城域相连，不提供等级上限。"
+                      : "与城域相连，为所属城解锁等级上限。"}
                     {hamletOf(city) !== "urban"
                       ? `升格为${hamletLabel(SITE_UPGRADE[hamletOf(city) as "village" | "suburb"].to)}：物资 ${SITE_UPGRADE[hamletOf(city) as "village" | "suburb"].supplies}、奴隶 ${SITE_UPGRADE[hamletOf(city) as "village" | "suburb"].slaves}。`
                       : "已是城区，解锁最多。"}
                   </p>
                 ) : (
                   <p className="muted">
-                    建筑等级上限 {cityLevelCap(sim, city)}（基础 4 + 下属乡村合计）。
-                    附属 {childrenOf(sim, city.id).length} 处：
-                    {childrenOf(sim, city.id).map((v) => `${hamletLabel(hamletOf(v))}`).join("、") || "无"}。
-                    乡村必须一圈圈向外连通。
+                    建筑等级上限 {cityLevelCap(sim, city)}（基础 4 + 城域相连的乡村）。
+                    相连 {linkedChildrenOf(sim, city).length} 处
+                    {childrenOf(sim, city.id).length > linkedChildrenOf(sim, city).length
+                      ? `，另有 ${childrenOf(sim, city.id).length - linkedChildrenOf(sim, city).length} 处未相连不计上限`
+                      : ""}
+                    ：{linkedChildrenOf(sim, city).map((v) => `${hamletLabel(hamletOf(v))}`).join("、") || "无"}。
+                    乡村必须一圈圈与城邦邻接；中间被拆或占走，外圈不再解锁。
                   </p>
                 )}
                 <div className="row">

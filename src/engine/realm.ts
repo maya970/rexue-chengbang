@@ -25,19 +25,37 @@ export function isClaimed(world: World, owner: string, x: number, y: number) {
   return world.claims?.[tileKey(x, y)] === owner;
 }
 
-/** steal：占领/屠城等才改写他人连通。同一时期一格只属一人。 */
+export function isAllyClaim(world: World, owner: string, x: number, y: number) {
+  const who = claimOwner(world, x, y);
+  return Boolean(who && alliesOf(world, owner).has(who));
+}
+
+export function isPlayerClaim(world: World, x: number, y: number) {
+  const who = claimOwner(world, x, y);
+  return Boolean(who && !who.startsWith("npc:"));
+}
+
+/** steal：占领/屠城等才改写他人连通。同一时期一格只属一人。不抢公会成员的连通。 */
 export function claimTile(world: World, owner: string, x: number, y: number, steal = false) {
   if (!world.claims) world.claims = {};
   const k = tileKey(x, y);
   const who = world.claims[k];
-  if (who && who !== owner && !steal) return false;
+  if (who && who !== owner) {
+    if (alliesOf(world, owner).has(who)) return true;
+    if (!steal) return false;
+  }
   world.claims[k] = owner;
   return true;
 }
 
+export function unclaimTile(world: World, x: number, y: number) {
+  if (!world.claims) return;
+  delete world.claims[tileKey(x, y)];
+}
+
 export function adjacentClaimed(world: World, owner: string, x: number, y: number) {
   for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-    if (isClaimed(world, owner, x + dx, y + dy)) return true;
+    if (isAllyClaim(world, owner, x + dx, y + dy)) return true;
   }
   return false;
 }
@@ -46,12 +64,13 @@ export function claimsGap(world: World, owner: string, tiles: { x: number; y: nu
   for (let i = 0; i < tiles.length; i += 1) {
     const p = tiles[i];
     if (p.x === destX && p.y === destY) {
-      if (!adjacentClaimed(world, owner, p.x, p.y) && !isClaimed(world, owner, p.x, p.y)) {
-        return `第二座城必须与已打下来的格子连通 (${p.x},${p.y})`;
+      if (!adjacentClaimed(world, owner, p.x, p.y) && !isAllyClaim(world, owner, p.x, p.y)) {
+        return `必须与已连通格子相邻，可共享公会连通 (${p.x},${p.y})`;
       }
       continue;
     }
-    if (!isClaimed(world, owner, p.x, p.y)) return `须先打通连通格 (${p.x},${p.y})`;
+    if (terrainAt(p.x, p.y) === "sea") continue;
+    if (!isAllyClaim(world, owner, p.x, p.y)) return `须先一格格打通连通 (${p.x},${p.y})，公会已连通的可共享`;
   }
   return null;
 }
