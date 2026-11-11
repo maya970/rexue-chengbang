@@ -1,9 +1,9 @@
-import Arweave from "arweave";
 import { AR_FEE_ADDR, splitWinston } from "../engine/catalog";
+import { arweaveClient, gatewayOrigins } from "./gateways";
 import type { Jwk } from "./wallet";
 import type { TxProof } from "../types";
 
-const arweave = Arweave.init({ host: "arweave.net", port: 443, protocol: "https" });
+const arweave = arweaveClient();
 
 export function marketBucket(role?: string) {
   if (role === "toxotes") return "bow";
@@ -29,11 +29,13 @@ async function postWinston(jwk: Jwk, target: string, quantity: number, tags: Rec
   const tx = await arweave.createTransaction({ target, quantity: String(quantity) }, jwk as never);
   for (const [k, v] of Object.entries(tags)) tx.addTag(k, v);
   await arweave.transactions.sign(tx, jwk as never);
-  const res = await arweave.transactions.post(tx);
-  if (res.status !== 200 && res.status !== 202) {
-    throw new Error(`AR 转账失败 HTTP ${res.status}`);
+  let last = 0;
+  for (const origin of gatewayOrigins()) {
+    const res = await arweaveClient(origin).transactions.post(tx);
+    last = res.status;
+    if (res.status === 200 || res.status === 202) return tx.id;
   }
-  return tx.id;
+  throw new Error(`AR 转账失败 HTTP ${last}`);
 }
 
 export async function payListing(

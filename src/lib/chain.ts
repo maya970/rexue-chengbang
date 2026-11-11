@@ -1,5 +1,6 @@
 import { foldHistory } from "../engine/simulate";
 import type { MarketPair, TrackedBatch, TxProof, WorldCheckpoint } from "../types";
+import { SEARCH_GQL, fetchTxText, pickGraphql } from "./gateways";
 import {
   fetchBatchesFromGraphQL,
   fetchBatchHeads,
@@ -11,14 +12,15 @@ import {
   type WorldSnapshot,
 } from "./query";
 
-export const GQL_PRIMARY = import.meta.env.VITE_ARWEAVE_GQL || "https://arweave.net/graphql";
-export const GQL_BACKUP = import.meta.env.VITE_ARWEAVE_GQL_BACKUP || "https://arweave-search.goldsky.com/graphql";
-const GATEWAY = import.meta.env.VITE_ARWEAVE_GATEWAY || "https://arweave.net";
+export const GQL_BACKUP = import.meta.env.VITE_ARWEAVE_GQL_BACKUP || SEARCH_GQL;
 
 async function readData(id: string): Promise<string> {
-  const res = await fetch(`${GATEWAY}/${id}`);
-  if (!res.ok) throw new Error(`读取交易失败 ${id}`);
-  return res.text();
+  return fetchTxText(id);
+}
+
+async function gqlPair() {
+  const primary = await pickGraphql();
+  return { primary, backup: GQL_BACKUP };
 }
 
 function intersectBatches(a: TrackedBatch[], b: TrackedBatch[]): TrackedBatch[] {
@@ -39,9 +41,11 @@ function intersectHeads(
 }
 
 export async function queryTxAgreed(txId: string): Promise<{ found: boolean; timestamp?: number }> {
-  const first = await queryTx(GQL_PRIMARY, txId);
+  const { primary, backup } = await gqlPair();
+  const first = await queryTx(primary, txId);
   if (first.found) return first;
-  return queryTx(GQL_BACKUP, txId).catch(() => ({ found: false }));
+  if (backup === primary) return { found: false };
+  return queryTx(backup, txId).catch(() => ({ found: false }));
 }
 
 export async function loadChainState(snap: WorldSnapshot | null): Promise<{
@@ -49,8 +53,9 @@ export async function loadChainState(snap: WorldSnapshot | null): Promise<{
   checkpoint: WorldCheckpoint | null;
   pairs: MarketPair[];
 }> {
-  const headsA = await fetchBatchHeads(GQL_PRIMARY).catch(() => []);
-  const headsB = await fetchBatchHeads(GQL_BACKUP).catch(() => []);
+  const { primary, backup } = await gqlPair();
+  const headsA = await fetchBatchHeads(primary).catch(() => []);
+  const headsB = await fetchBatchHeads(backup).catch(() => []);
   const heads = intersectHeads(headsA, headsB);
 
   let checkpoint: WorldCheckpoint | null = snap?.checkpoint || null;
@@ -64,21 +69,21 @@ export async function loadChainState(snap: WorldSnapshot | null): Promise<{
   const indexedIds = new Set(indexed.map((b) => b.txId).filter(Boolean) as string[]);
   const missingOld = heads.some((h) => checkpoint && h.time && h.time <= checkpoint.lastTime && !indexedIds.has(h.id));
   if (!snap || missingOld || !checkpoint) {
-    const fullA = await fetchBatchesFromGraphQL(GQL_PRIMARY, readData).catch(() => [] as TrackedBatch[]);
-    const fullB = await fetchBatchesFromGraphQL(GQL_BACKUP, readData).catch(() => [] as TrackedBatch[]);
+    const fullA = await fetchBatchesFromGraphQL(primary, readData).catch(() => [] as TrackedBatch[]);
+    const fullB = await fetchBatchesFromGraphQL(backup, readData).catch(() => [] as TrackedBatch[]);
     indexed = intersectBatches(fullA, fullB);
     checkpoint = null;
   }
 
   const overlapFrom = (checkpoint?.lastTime || snap?.generatedAt || Date.now()) - 600000;
-  const recentA = await fetchRecentBatchesFromGraphQL(GQL_PRIMARY, readData, overlapFrom).catch(() => [] as TrackedBatch[]);
-  const recentB = await fetchRecentBatchesFromGraphQL(GQL_BACKUP, readData, overlapFrom).catch(() => [] as TrackedBatch[]);
+  const recentA = await fetchRecentBatchesFromGraphQL(primary, readData, overlapFrom).catch(() => [] as TrackedBatch[]);
+  const recentB = await fetchRecentBatchesFromGraphQL(backup, readData, overlapFrom).catch(() => [] as TrackedBatch[]);
   const recent = intersectBatches(recentA, recentB);
 
   const merged = mergeById(indexed, recent);
   const payIds = merged.flatMap((b) => b.commands.flatMap((c) => [c.payTx, c.feeTx || c.burnTx].filter(Boolean) as string[]));
-  const proofsA = await fetchTxProofs(GQL_PRIMARY, payIds).catch(() => ({} as Record<string, TxProof>));
-  const proofsB = await fetchTxProofs(GQL_BACKUP, payIds).catch(() => ({} as Record<string, TxProof>));
+  const proofsA = await fetchTxProofs(primary, payIds).catch(() => ({} as Record<string, TxProof>));
+  const proofsB = await fetchTxProofs(backup, payIds).catch(() => ({} as Record<string, TxProof>));
   const proofs = agreeProofs(proofsA, proofsB);
 
   const withProofs = merged.map((b) => {
@@ -91,8 +96,8 @@ export async function loadChainState(snap: WorldSnapshot | null): Promise<{
     return { ...b, proofs: p };
   });
 
-  const mA = await fetchMarketTransfers(GQL_PRIMARY).catch(() => [] as TxProof[]);
-  const mB = await fetchMarketTransfers(GQL_BACKUP).catch(() => [] as TxProof[]);
+  const mA = await fetchMarketTransfers(primary).catch(() => [] as TxProof[]);
+  const mB = await fetchMarketTransfers(backup).catch(() => [] as TxProof[]);
   const market = intersectProofs(mA, mB);
   return { batches: withProofs, checkpoint, pairs: pairMarket(market) };
 }

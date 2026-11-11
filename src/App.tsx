@@ -49,6 +49,7 @@ export function App() {
   const [cardId, setCardId] = useState<string>("");
   const [recruitQty, setRecruitQty] = useState<Partial<Record<RoleId, number>>>({});
   const [rosterOpen, setRosterOpen] = useState(false);
+  const [stockOpen, setStockOpen] = useState(false);
   const [cityPins, setCityPins] = useState<{ id: string; name: string; x: number; y: number }[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("rexue-chengbang-my-cities") || "[]") as { id: string; name: string; x: number; y: number }[];
@@ -286,11 +287,12 @@ export function App() {
   return (
     <div className="app app-3d">
       <header className="top">
-        <div className="brand cinzel">
-          <b>热血城邦</b>
-          <span>完全免费 · 游戏内钱包 · 操作都在游戏里</span>
-        </div>
         <nav className="top-nav">
+          {g.address ? (
+            <button className={`btn tiny${stockOpen ? " primary" : ""}`} onClick={() => setStockOpen((v) => !v)}>
+              {stockOpen ? "收起库藏" : "库藏"}
+            </button>
+          ) : null}
           <button className="btn tiny" onClick={openReports}>
             {t("reports")}{unreadReports.length ? ` ${unreadReports.length}` : ""}
           </button>
@@ -340,7 +342,7 @@ export function App() {
       </header>
 
       <div className="stage">
-        {g.address ? (
+        {g.address && stockOpen ? (
           <EmpireHud
             address={g.address}
             city={mine ? city : undefined}

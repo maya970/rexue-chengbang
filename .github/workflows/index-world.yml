@@ -10,6 +10,8 @@ on:
     paths:
       - "src/engine/**"
       - "src/lib/query.ts"
+      - "src/lib/gateways.ts"
+      - "src/lib/chain.ts"
       - "scripts/index-world.ts"
       - ".github/workflows/index-world.yml"
 
@@ -28,8 +30,8 @@ jobs:
       - run: npm ci
       - run: npm run index-world
         env:
-          ARWEAVE_GATEWAY: ${{ vars.ARWEAVE_GATEWAY || 'https://arweave.net' }}
-          ARWEAVE_GQL: ${{ vars.ARWEAVE_GQL || 'https://arweave.net/graphql' }}
+          ARWEAVE_GATEWAY: ${{ vars.ARWEAVE_GATEWAY || 'https://ardrive.net' }}
+          ARWEAVE_GQL: ${{ vars.ARWEAVE_GQL || 'https://ardrive.net/graphql' }}
       - uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

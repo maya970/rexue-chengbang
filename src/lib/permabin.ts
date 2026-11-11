@@ -1,17 +1,9 @@
-import Arweave from "arweave";
 import { APP_NAME, COLLECTION, PROTOCOL } from "../engine/catalog";
 import type { CommandBatch, TrackedBatch } from "../types";
+import { SEARCH_GQL, arweaveClient, fetchTxText, pickGraphql } from "./gateways";
 import { fetchBatchesFromGraphQL, fetchRecentBatchesFromGraphQL, fetchTxProofs, queryTx, type WorldSnapshot } from "./query";
 
-const GATEWAY = import.meta.env.VITE_ARWEAVE_GATEWAY || "https://arweave.net";
-const GQL = import.meta.env.VITE_ARWEAVE_GQL || `${GATEWAY}/graphql`;
-const GQL_BACKUP = import.meta.env.VITE_ARWEAVE_GQL_BACKUP || "https://arweave-search.goldsky.com/graphql";
-
-export const arweave = Arweave.init({
-  host: new URL(GATEWAY).hostname,
-  port: 443,
-  protocol: "https",
-});
+export const arweave = arweaveClient();
 
 export function batchToTags(batch: CommandBatch): { name: string; value: string }[] {
   return [
@@ -49,9 +41,11 @@ export async function uploadBatch(batch: CommandBatch, jwk: Record<string, unkno
 }
 
 export async function queryTxOnChain(txId: string): Promise<{ found: boolean; timestamp?: number }> {
-  const a = await queryTx(GQL, txId);
+  const gql = await pickGraphql();
+  const a = await queryTx(gql, txId);
   if (a.found) return a;
-  return queryTx(GQL_BACKUP, txId).catch(() => ({ found: false }));
+  if (gql === SEARCH_GQL) return { found: false };
+  return queryTx(SEARCH_GQL, txId).catch(() => ({ found: false }));
 }
 
 export async function waitUntilQueryable(
@@ -72,16 +66,15 @@ export async function waitUntilQueryable(
 }
 
 async function readTx(id: string): Promise<string> {
-  const data = await arweave.transactions.getData(id, { decode: true, string: true });
-  return String(data);
+  return fetchTxText(id);
 }
 
 export async function fetchBatchesFromChain(): Promise<TrackedBatch[]> {
-  return fetchBatchesFromGraphQL(GQL, readTx);
+  return fetchBatchesFromGraphQL(await pickGraphql(), readTx);
 }
 
 export async function fetchRecentBatches(sinceMs: number): Promise<TrackedBatch[]> {
-  return fetchRecentBatchesFromGraphQL(GQL, readTx, sinceMs);
+  return fetchRecentBatchesFromGraphQL(await pickGraphql(), readTx, sinceMs);
 }
 
 export async function attachPaymentProofs(batches: TrackedBatch[]): Promise<TrackedBatch[]> {
@@ -94,7 +87,7 @@ export async function attachPaymentProofs(batches: TrackedBatch[]): Promise<Trac
     }
   }
   if (!ids.length) return batches;
-  const fetched = await fetchTxProofs(GQL, ids);
+  const fetched = await fetchTxProofs(await pickGraphql(), ids);
   return batches.map((b) => {
     const proofs = { ...b.proofs };
     for (const c of b.commands) {

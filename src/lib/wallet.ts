@@ -1,7 +1,7 @@
-import Arweave from "arweave";
+import { arweaveClient } from "./gateways";
 
 const KEY = "rexue-chengbang-jwk";
-const arweave = Arweave.init({ host: "arweave.net", port: 443, protocol: "https" });
+const arweave = arweaveClient();
 
 export type Jwk = Record<string, unknown>;
 

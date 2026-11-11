@@ -1,15 +1,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { APP_NAME, PROTOCOL } from "../src/engine/catalog.ts";
 import { foldHistory } from "../src/engine/simulate.ts";
+import { fetchTxText, pickGraphql } from "../src/lib/gateways.ts";
 import { fetchBatchesFromGraphQL, fetchMarketTransfers, fetchTxProofs, pairMarket, type WorldSnapshot } from "../src/lib/query.ts";
 
-const GQL = process.env.ARWEAVE_GQL || "https://arweave.net/graphql";
-const GATEWAY = process.env.ARWEAVE_GATEWAY || "https://arweave.net";
+const GQL = process.env.ARWEAVE_GQL || await pickGraphql();
 
 async function readData(id: string): Promise<string> {
-  const res = await fetch(`${GATEWAY}/${id}`);
-  if (!res.ok) throw new Error(`读取交易失败 ${id} HTTP ${res.status}`);
-  return res.text();
+  return fetchTxText(id);
 }
 
 const raw = await fetchBatchesFromGraphQL(GQL, readData);
