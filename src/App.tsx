@@ -6,8 +6,8 @@ import { planPath } from "./engine/path";
 import { canBuildOn, plotTimeMult } from "./engine/plots";
 import { copiesOf, highestLevel, plotJobs, workLevel } from "./engine/works";
 import { empireTimeFactor, slaveCostFor, workersFor } from "./engine/site";
-import { claimOwner, claimsGap, isAllyClaim, isClaimed } from "./engine/realm";
-import { alliesOf, buildSlotsOf, citizensOf, corridorBlocked, homeOf, idleSlaves, idleSupply, idleWorkers, recruitCapOf, roleCapOf, roleCountOf, worksOf } from "./engine/simulate";
+import { adjacentClaimed, claimOwner, claimsGap, isAllyClaim, isClaimed } from "./engine/realm";
+import { alliesOf, buildSlotsOf, chartReachError, citizensOf, corridorBlocked, homeOf, idleSlaves, idleSupply, idleWorkers, recruitCapOf, roleCapOf, roleCountOf, worksOf } from "./engine/simulate";
 import { loadInbox, mergeInbox } from "./lib/inbox";
 import { HelpBoard } from "./i18n/HelpBoard";
 import { LangSelect, useI18n } from "./i18n";
@@ -98,6 +98,7 @@ export function App() {
   const [fromCityId, setFromCityId] = useState("");
   const [plotId, setPlotId] = useState("");
   const [guildName, setGuildName] = useState("新城邦同盟");
+  const [inviteAddr, setInviteAddr] = useState("");
   const [boardQ, setBoardQ] = useState("");
   const [boardCat, setBoardCat] = useState<BoardCat>("all");
 
@@ -127,8 +128,13 @@ export function App() {
   const blocked = origin && path?.ok
     ? corridorBlocked(sim, path.tiles, g.address, sel!.x, sel!.y)
     : null;
+  const chartMiss = origin && sel && g.address ? chartReachError(sim, g.address, sel.x, sel.y) : null;
   const claimMiss = origin && path?.ok && sel && (mission === "colonize" || mission === "settle")
     ? claimsGap(sim, g.address, path.tiles, sel.x, sel.y)
+    : null;
+  const scoutMiss = origin && sel && g.address && mission === "scout" && !selCity && terrainAt(sel.x, sel.y) !== "sea"
+    && !adjacentClaimed(sim, g.address, sel.x, sel.y) && !isAllyClaim(sim, g.address, sel.x, sel.y)
+    ? "侦察抢格必须与己方或公会已连通格子相邻，不能从海上直接夺远离连通的空地"
     : null;
   const villageMiss = origin && sel && mission === "settle" ? canFoundVillage(sim, g.address, origin, sel.x, sel.y) : null;
   const seaColonize = Boolean(sel && (mission === "colonize" || mission === "settle") && !canColonize(terrainAt(sel.x, sel.y)));
@@ -214,6 +220,16 @@ export function App() {
   function backToMap() {
     setLayer("play");
     closeDrawers();
+  }
+
+  function kickMember(id: string) {
+    if (!myGuild) return;
+    g.addCommand(makeCommand({ kind: "kick_guild", label: `开除 ${shortAddr(id)}`, memberId: id }));
+  }
+
+  function inviteMember(id: string) {
+    if (!myGuild || !id.trim()) return;
+    g.addCommand(makeCommand({ kind: "invite_guild", label: `邀请 ${shortAddr(id.trim())}`, memberId: id.trim() }));
   }
 
   const boardModal = modal === "reports" || modal === "guild" || modal === "atlas" || modal === "help";
@@ -463,10 +479,26 @@ export function App() {
         ) : layer === "guild" ? (
           <div className="stage-fill stage-mail">
             {myGuild ? (
-              <div className="card">
-                <div>{myGuild.name}<small>{myGuild.members.length}</small></div>
-                <button className="btn tiny" onClick={() => { g.addCommand(makeCommand({ kind: "leave_guild", label: `退出公会 ${myGuild.name}` })); setLayer("play"); }}>退</button>
-              </div>
+              <>
+                <div className="card">
+                  <div>{myGuild.name}<small>{myGuild.members.length}</small></div>
+                  <button className="btn tiny" onClick={() => { g.addCommand(makeCommand({ kind: "leave_guild", label: `退出公会 ${myGuild.name}` })); setLayer("play"); }}>退</button>
+                </div>
+                {g.address === myGuild.leader ? (
+                  <>
+                    <div className="row">
+                      <input value={inviteAddr} onChange={(e) => setInviteAddr(e.target.value)} placeholder="邀请地址" />
+                      <button className="btn tiny" onClick={() => { inviteMember(inviteAddr); setInviteAddr(""); setLayer("play"); }}>邀</button>
+                    </div>
+                    {myGuild.members.filter((id) => id !== myGuild.leader).map((id) => (
+                      <div className="card" key={id}>
+                        <div>{shortAddr(id)}</div>
+                        <button className="btn tiny" onClick={() => { kickMember(id); setLayer("play"); }}>开</button>
+                      </div>
+                    ))}
+                  </>
+                ) : null}
+              </>
             ) : (
               <div className="row">
                 <input value={guildName} onChange={(e) => setGuildName(e.target.value)} placeholder="公会名" />
@@ -477,9 +509,11 @@ export function App() {
               {filteredGuilds.map((guild) => (
                 <div className="card" key={guild.id}>
                   <div>{guild.name}<small>{guild.members.length}</small></div>
-                  {guild.id === myGuildId ? null : (
+                  {guild.id === myGuildId ? null : (g.address && (guild.invites || []).includes(g.address) ? (
                     <button className="btn tiny" onClick={() => { g.addCommand(makeCommand({ kind: "join_guild", label: `加入 ${guild.name}`, guildId: guild.id })); setLayer("play"); }}>入</button>
-                  )}
+                  ) : (
+                    <span className="muted">须邀</span>
+                  ))}
                 </div>
               ))}
             </div>
@@ -672,12 +706,14 @@ export function App() {
                 ) : null}
                 {path?.ok ? <p className="muted">{path.naval ? "海路" : "陆路"} {path.dist} 格</p> : path && !path.ok ? <p className="err">{path.reason}</p> : null}
                 {blocked ? <p className="err">{blocked}</p> : null}
+                {chartMiss ? <p className="err">{chartMiss}</p> : null}
                 {claimMiss ? <p className="err">{claimMiss}</p> : null}
+                {scoutMiss ? <p className="err">{scoutMiss}</p> : null}
                 {villageMiss ? <p className="err">{villageMiss}</p> : null}
                 {seaColonize ? <p className="err">海域不能殖民，请选海岸或陆地。</p> : null}
                 {friendlyFire ? <p className="err">{selCity?.owner === g.address ? "不能攻击自己的城。" : "不能攻击同公会成员。"}</p> : null}
                 {!g.address ? <p>先创建钱包。</p> : null}
-                {g.address && !g.myCities.length ? (
+                {g.address && !g.myCities.length && !selCity && !selNpc ? (
                   <>
                     <input value={cityName} onChange={(e) => setCityName(e.target.value)} />
                     <button className="btn primary" onClick={() => {
@@ -726,7 +762,7 @@ export function App() {
                           return true;
                         }).map((m) => <option key={m} value={m}>{MISSION_NAME[m]}</option>)}
                       </select>
-                      <button className="btn primary" onClick={() => setModal("squad")} disabled={Boolean(blocked) || Boolean(claimMiss) || Boolean(villageMiss) || seaColonize || friendlyFire}>挑选将士出征</button>
+                      <button className="btn primary" onClick={() => setModal("squad")} disabled={Boolean(blocked) || Boolean(chartMiss) || Boolean(claimMiss) || Boolean(scoutMiss) || Boolean(villageMiss) || seaColonize || friendlyFire}>挑选将士出征</button>
                     </div>
                     {mission === "scout" && selCity && isHamlet(selCity) && selCity.owner !== g.address ? (
                       <p className="err">侦察敌方乡村会抢劫该村，不能夺格。要占地请改占领或屠城。</p>
@@ -741,7 +777,7 @@ export function App() {
                       <p className="muted">侦察只能夺与已连通邻接的空地。公会连通可共享。路上有野蛮人须先进攻清理。</p>
                     ) : null}
                     {mission === "occupy" || mission === "destroy" || mission === "massacre" || mission === "plunder" ? (
-                      <p className="muted">须沿已连通格子推进。挡路的野蛮人、乡村要占领或毁灭，劫掠不能开路。要留下城请用占领或屠城。</p>
+                      <p className="muted">须沿已连通格子推进。挡路的野蛮人、乡村要占领或毁灭，劫掠不能开路。要留下城请用占领或屠城。跨海图只能打相邻海图。</p>
                     ) : null}
                     <p className="muted">当前从 {origin.name} 出发，此地可派 {originPeople.filter((c) => !c.jobId).length} 人。</p>
                   </>
@@ -936,6 +972,7 @@ export function App() {
                 <h3>从 {origin.name} 出征 · {MISSION_NAME[mission]}</h3>
                 <p className="muted">必须勾选将士。目标是大地图点中的格子，出发城是上面选的城。</p>
                 {blocked && mission !== "scout" ? <p className="err">{blocked}</p> : null}
+                {chartMiss ? <p className="err">{chartMiss}</p> : null}
                 {seaColonize ? <p className="err">海域不能殖民，请选海岸或陆地。</p> : null}
                 {friendlyFire ? <p className="err">{selCity?.owner === g.address ? "不能攻击自己的城。" : "不能攻击同公会成员。"}</p> : null}
                 {originPeople.filter((c) => !c.jobId && !c.listedWinston).length === 0 ? <p className="err">出发城里没有空闲将士。</p> : null}
@@ -952,7 +989,7 @@ export function App() {
                   </label>
                 ))}
                 {sel ? (
-                  <button className="btn primary" disabled={(Boolean(blocked) && mission !== "scout") || pickedP.length === 0 || seaColonize || friendlyFire || Boolean(villageMiss)} onClick={() => {
+                  <button className="btn primary" disabled={(Boolean(blocked) && mission !== "scout") || Boolean(chartMiss) || pickedP.length === 0 || seaColonize || friendlyFire || Boolean(villageMiss)} onClick={() => {
                     g.addCommand(makeCommand({
                       kind: "march",
                       label: `${MISSION_NAME[mission]} 从${origin.name} → (${sel.x},${sel.y})`,
@@ -1016,13 +1053,29 @@ export function App() {
                 </div>
                 <div className="board-body">
                   {myGuild ? (
-                    <div className="card">
-                      <div>{myGuild.name}<small>会长 {shortAddr(myGuild.leader)} · {myGuild.members.length} 人</small></div>
-                      <button className="btn tiny" onClick={() => {
-                        g.addCommand(makeCommand({ kind: "leave_guild", label: `退出公会 ${myGuild.name}` }));
-                        setModal("none");
-                      }}>退出公会</button>
-                    </div>
+                    <>
+                      <div className="card">
+                        <div>{myGuild.name}<small>会长 {shortAddr(myGuild.leader)} · {myGuild.members.length} 人</small></div>
+                        <button className="btn tiny" onClick={() => {
+                          g.addCommand(makeCommand({ kind: "leave_guild", label: `退出公会 ${myGuild.name}` }));
+                          setModal("none");
+                        }}>退出公会</button>
+                      </div>
+                      {g.address === myGuild.leader ? (
+                        <>
+                          <div className="row">
+                            <input value={inviteAddr} onChange={(e) => setInviteAddr(e.target.value)} placeholder="邀请钱包地址" />
+                            <button className="btn tiny" onClick={() => { inviteMember(inviteAddr); setInviteAddr(""); setModal("none"); }}>邀请</button>
+                          </div>
+                          {myGuild.members.filter((id) => id !== myGuild.leader).map((id) => (
+                            <div className="card" key={id}>
+                              <div>{shortAddr(id)}<small>成员</small></div>
+                              <button className="btn tiny" onClick={() => { kickMember(id); setModal("none"); }}>开除</button>
+                            </div>
+                          ))}
+                        </>
+                      ) : null}
+                    </>
                   ) : (
                     <div className="row">
                       {g.address && (sim.guildBanUntil?.[g.address] || 0) > g.now ? (
@@ -1039,12 +1092,14 @@ export function App() {
                     {filteredGuilds.length ? filteredGuilds.map((guild) => (
                       <div className="card" key={guild.id}>
                         <div>{guild.name}<small>{guild.members.length} 人 · 会长 {shortAddr(guild.leader)}</small></div>
-                        {guild.id === myGuildId ? <span className="muted">已加入</span> : (
+                        {guild.id === myGuildId ? <span className="muted">已加入</span> : (g.address && (guild.invites || []).includes(g.address) ? (
                           <button className="btn tiny" onClick={() => {
                             g.addCommand(makeCommand({ kind: "join_guild", label: `加入 ${guild.name}`, guildId: guild.id }));
                             setModal("none");
                           }}>加入</button>
-                        )}
+                        ) : (
+                          <span className="muted">须会长邀请</span>
+                        ))}
                       </div>
                     )) : <p className="muted">{t("emptyGuild")}</p>}
                   </div>
@@ -1158,7 +1213,7 @@ export function App() {
             ))}
           </div>
         </div>
-        <button className="btn primary" style={{ minWidth: 160 }} onClick={g.execute} disabled={!g.pending.length || Boolean(g.busy)}>
+        <button className="btn primary" style={{ minWidth: 160 }} onClick={g.execute} disabled={!g.pending.length || g.pendingDup}>
           {phone ? "执行" : "执行指令"}
         </button>
       </footer>

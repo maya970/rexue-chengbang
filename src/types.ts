@@ -60,6 +60,8 @@ export type CommandKind =
   | "create_guild"
   | "join_guild"
   | "leave_guild"
+  | "kick_guild"
+  | "invite_guild"
   | "upgrade_site"
   | "rename_city";
 
@@ -75,6 +77,8 @@ export interface Guild {
   leader: string;
   members: string[];
   createdAt: number;
+  /** 会长发出的入会邀请，加入后清除。 */
+  invites?: string[];
 }
 
 export interface Campaign {
@@ -110,6 +114,7 @@ export interface Command {
   burnTx?: string;
   feeTx?: string;
   guildId?: string;
+  memberId?: string;
   /** 一次招募多张。 */
   count?: number;
 }

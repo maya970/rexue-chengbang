@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { chartCenter, chartOf } from "../engine/map";
 import { foldHistory, playerCities, projectWorld } from "../engine/simulate";
 import { veilWorld } from "../engine/veil";
@@ -11,6 +11,7 @@ import {
   waitUntilQueryable,
 } from "../lib/permabin";
 import { payListing } from "../lib/market";
+import { commandSetFinger } from "../lib/cmd";
 import { clearJwk, createWallet, exportWallet, importWallet, jwkAddress, loadJwk, type Jwk } from "../lib/wallet";
 import type { Command, MarketPair, TrackedBatch, WorldCheckpoint } from "../types";
 
@@ -31,6 +32,7 @@ export function useGame() {
   const [selected, setSelected] = useState<{ x: number; y: number } | null>(() => chartCenter(0, 0));
   const [focusCityId, setFocusCityId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const sendingRef = useRef(0);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -181,6 +183,16 @@ export function useGame() {
     return payListing(jwk, address, seller, winston, cardId, listingId, cityId);
   }, [jwk, address]);
 
+  const pendingDup = useMemo(() => {
+    if (!pending.length) return false;
+    const finger = commandSetFinger(pending);
+    return batches.some(
+      (b) =>
+        (b.status === "queued" || b.status === "queued_uploaded") &&
+        commandSetFinger(b.commands) === finger,
+    );
+  }, [pending, batches]);
+
   const execute = useCallback(async () => {
     if (!address || !jwk) {
       setError("请先在游戏内创建或导入钱包，无需插件或签名弹窗");
@@ -188,6 +200,16 @@ export function useGame() {
     }
     if (!pending.length) {
       setError("指令列表为空");
+      return;
+    }
+    const finger = commandSetFinger(pending);
+    const dup = batches.some(
+      (b) =>
+        (b.status === "queued" || b.status === "queued_uploaded") &&
+        commandSetFinger(b.commands) === finger,
+    );
+    if (dup) {
+      setError("这批指令正在发送，不必重复执行");
       return;
     }
     setError("");
@@ -204,6 +226,7 @@ export function useGame() {
     };
     setBatches((b) => [...b, tracked]);
     setPending([]);
+    sendingRef.current += 1;
     setBusy("排队中");
     try {
       const pack = {
@@ -217,7 +240,7 @@ export function useGame() {
       };
       const { txId } = await uploadBatch(pack, jwk);
       setBatches((bs) => bs.map((b) => (b.key === key ? { ...b, status: "queued_uploaded", txId } : b)));
-      setBusy("排队中（已上传）");
+      if (sendingRef.current > 0) setBusy("排队中（已上传）");
       const confirmed = await waitUntilQueryable(txId);
       setBatches((bs) =>
         bs.map((b) =>
@@ -226,14 +249,15 @@ export function useGame() {
             : b,
         ),
       );
-      setBusy("");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setBatches((bs) => bs.map((b) => (b.key === key ? { ...b, status: "failed", error: msg } : b)));
-      setBusy("");
       setError(msg);
+    } finally {
+      sendingRef.current = Math.max(0, sendingRef.current - 1);
+      setBusy(sendingRef.current > 0 ? "排队中" : "");
     }
-  }, [address, jwk, pending]);
+  }, [address, jwk, pending, batches]);
 
   return {
     booting,
@@ -265,6 +289,7 @@ export function useGame() {
     doImport,
     doExport,
     logout,
+    pendingDup,
     execute,
     payForCard,
     load,

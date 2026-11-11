@@ -1,4 +1,4 @@
-import { canFound, cityIdAt, hashXY, isWater, terrainAt } from "./map";
+import { canFound, chartOf, cityIdAt, hashXY, isWater, terrainAt } from "./map";
 import { seedCityPlots } from "./plots";
 import { buildMultAt, frontageAt } from "./site";
 import type { Guild, SystemRank, World } from "../types";
@@ -58,6 +58,53 @@ export function adjacentClaimed(world: World, owner: string, x: number, y: numbe
     if (isAllyClaim(world, owner, x + dx, y + dy)) return true;
   }
   return false;
+}
+
+function parseTileKey(k: string) {
+  const i = k.indexOf(":");
+  if (i < 1) return null;
+  const x = Number(k.slice(0, i));
+  const y = Number(k.slice(i + 1));
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+/** 己方或公会已连通的海图。 */
+export function heldCharts(world: World, owner: string): Set<string> {
+  const friends = alliesOf(world, owner);
+  const held = new Set<string>();
+  for (const city of Object.values(world.cities || {})) {
+    if (!friends.has(city.owner) || city.npc) continue;
+    const c = chartOf(city.x, city.y);
+    held.add(`${c.cx}:${c.cy}`);
+  }
+  for (const [key, who] of Object.entries(world.claims || {})) {
+    if (!who || !friends.has(who)) continue;
+    const p = parseTileKey(key);
+    if (!p) continue;
+    const c = chartOf(p.x, p.y);
+    held.add(`${c.cx}:${c.cy}`);
+  }
+  return held;
+}
+
+/**
+ * 跨海图作战：海域仍不必一格格连通，
+ * 但目标必须在已连通海图内，或与其正交相邻。
+ * 邻图哪怕还没有连通地块，也可以打；不能隔图跳跃。
+ */
+export function chartReachError(world: World, owner: string, toX: number, toY: number): string | null {
+  const dest = chartOf(toX, toY);
+  const held = heldCharts(world, owner);
+  if (!held.size) return "没有立足海图，无法出征";
+  if (held.has(`${dest.cx}:${dest.cy}`)) return null;
+  for (const k of held) {
+    const i = k.indexOf(":");
+    const cx = Number(k.slice(0, i));
+    const cy = Number(k.slice(i + 1));
+    if (Math.abs(cx - dest.cx) + Math.abs(cy - dest.cy) === 1) return null;
+  }
+  return "只能打相邻海图。海域不必连通，但邻图还没有己方或公会连通时，不能隔图再向外打";
 }
 
 export function claimsGap(world: World, owner: string, tiles: { x: number; y: number }[], destX: number, destY: number): string | null {
@@ -173,12 +220,30 @@ export function createGuild(world: World, owner: string, name: string, t: number
   return null;
 }
 
+export function inviteGuild(world: World, leader: string, memberId: string): string | null {
+  ensureGuildState(world);
+  const gid = world.memberOf[leader];
+  const g = gid ? world.guilds[gid] : undefined;
+  if (!g) return "不在公会中";
+  if (g.leader !== leader) return "只有会长可以邀请";
+  const who = (memberId || "").trim();
+  if (!who || who === leader) return "不能邀请自己";
+  if (g.members.includes(who)) return "对方已是成员";
+  if (!g.invites) g.invites = [];
+  if (g.invites.includes(who)) return null;
+  if (g.invites.length >= 32) return "待入邀请已满";
+  g.invites.push(who);
+  return null;
+}
+
 export function joinGuild(world: World, owner: string, guildId: string, t: number): string | null {
   ensureGuildState(world);
   if (world.memberOf[owner]) return "已在公会中";
   if ((world.guildBanUntil[owner] || 0) > t) return "退出公会后一个月内不能加入其他公会";
   const g = world.guilds[guildId];
   if (!g) return "没有这个公会";
+  if (!(g.invites || []).includes(owner)) return "须会长邀请才能加入";
+  g.invites = (g.invites || []).filter((id) => id !== owner);
   if (!g.members.includes(owner)) g.members.push(owner);
   world.memberOf[owner] = guildId;
   return null;
@@ -194,5 +259,19 @@ export function leaveGuild(world: World, owner: string, t: number): string | nul
   world.guildBanUntil[owner] = t + GUILD_BAN_MS;
   if (g.leader === owner) g.leader = g.members[0] || "";
   if (!g.members.length) delete world.guilds[g.id];
+  return null;
+}
+
+export function kickGuild(world: World, leader: string, memberId: string, t: number): string | null {
+  ensureGuildState(world);
+  const gid = world.memberOf[leader];
+  const g = gid ? world.guilds[gid] : undefined;
+  if (!g) return "不在公会中";
+  if (g.leader !== leader) return "只有会长可以开除";
+  if (!memberId || memberId === leader) return "不能开除自己";
+  if (!g.members.includes(memberId)) return "对方不在本公会";
+  g.members = g.members.filter((m) => m !== memberId);
+  delete world.memberOf[memberId];
+  world.guildBanUntil[memberId] = t + GUILD_BAN_MS;
   return null;
 }

@@ -192,7 +192,7 @@ export function MarketPage() {
             ))}
           </div>
         </div>
-        <button className="btn primary" style={{ minWidth: 160 }} onClick={g.execute} disabled={!g.pending.length || Boolean(g.busy)}>
+        <button className="btn primary" style={{ minWidth: 160 }} onClick={g.execute} disabled={!g.pending.length || g.pendingDup}>
           执行指令
         </button>
       </footer>
