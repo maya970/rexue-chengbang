@@ -168,7 +168,7 @@ const en: ReportDict = {
 };
 
 function fromEn(over: Partial<ReportDict>): ReportDict {
-  return { ...en, ...over };
+  return { ...en, ...over } as ReportDict;
 }
 
 const MORE: Partial<Record<LocaleId, Partial<ReportDict>>> = {
