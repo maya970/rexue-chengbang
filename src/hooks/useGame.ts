@@ -3,6 +3,7 @@ import { chartCenter, chartOf } from "../engine/map";
 import { foldHistory, playerCities, projectWorld } from "../engine/simulate";
 import { veilWorld } from "../engine/veil";
 import { loadChainState } from "../lib/chain";
+import { loadNetworkGateways } from "../lib/gateways";
 import {
   fetchSnapshot,
   newBatchKey,
@@ -42,6 +43,7 @@ export function useGame() {
 
   const load = useCallback(async () => {
     try {
+      await loadNetworkGateways().catch(() => undefined);
       const snap = await fetchSnapshot();
       const chain = await loadChainState(snap);
       setCheckpoint(chain.checkpoint);

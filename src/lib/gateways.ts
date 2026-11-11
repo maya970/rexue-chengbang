@@ -26,6 +26,8 @@ const TIMEOUT_MS: Record<string, number> = {
 let hotOrigin = "";
 let hotGql = "";
 let hotGqlAt = 0;
+let networkOrigins: string[] = [];
+let networkAt = 0;
 
 function nodeEnv(key: string): string {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
@@ -43,11 +45,15 @@ function envOrigin(): string {
   return v.replace(/\/$/, "");
 }
 
-export function gatewayOrigins(): string[] {
-  const extra = envOrigin();
-  const list = extra && !FREE_GATEWAYS.includes(extra as (typeof FREE_GATEWAYS)[number])
-    ? [extra, ...FREE_GATEWAYS]
-    : [...FREE_GATEWAYS];
+function normalizeOrigin(url: string) {
+  return url.replace(/\/$/, "");
+}
+
+function uniqueHttps(list: string[]) {
+  return [...new Set(list.map(normalizeOrigin).filter((u) => u.startsWith("https://")))];
+}
+
+function withHot(list: string[]) {
   if (hotOrigin) {
     const rest = list.filter((x) => x !== hotOrigin);
     return [hotOrigin, ...rest];
@@ -55,9 +61,53 @@ export function gatewayOrigins(): string[] {
   return list;
 }
 
+/** Fast subset for chain reads. */
+export function gatewayOrigins(): string[] {
+  const extra = envOrigin();
+  const list = uniqueHttps([extra, ...FREE_GATEWAYS, ...networkOrigins.slice(0, 24)]);
+  return withHot(list);
+}
+
+/** Every public HTTPS AR.IO gateway currently known. */
+export function allGatewayOrigins(): string[] {
+  const extra = envOrigin();
+  return withHot(uniqueHttps([extra, ...FREE_GATEWAYS, ...networkOrigins]));
+}
+
+/** Pull every public AR.IO gateway so reads and play links are not stuck on a short list. */
+export async function loadNetworkGateways() {
+  if (networkOrigins.length && Date.now() - networkAt < 60 * 60 * 1000) return networkOrigins;
+  for (const seed of [...FREE_GATEWAYS]) {
+    try {
+      const res = await fetchTimeout(`${seed}/ar-io/peers`, { cache: "no-store" }, timeoutFor(seed));
+      if (!res.ok) continue;
+      const json = (await res.json()) as {
+        self?: { url?: string };
+        gateways?: Record<string, { url?: string; status?: string }> | { url?: string; status?: string }[];
+      };
+      const urls: string[] = [];
+      if (json.self?.url) urls.push(json.self.url);
+      const gw = json.gateways;
+      const list = Array.isArray(gw) ? gw : Object.values(gw || {});
+      for (const g of list) {
+        if (g?.url && g.status !== "leaving") urls.push(g.url);
+      }
+      const https = [...new Set(urls.map(normalizeOrigin).filter((u) => u.startsWith("https://")))];
+      if (https.length >= FREE_GATEWAYS.length) {
+        networkOrigins = https;
+        networkAt = Date.now();
+        return networkOrigins;
+      }
+    } catch {
+      /* next seed */
+    }
+  }
+  return gatewayOrigins();
+}
+
 export function graphqlEndpoints(): string[] {
   const extra = envOrigin();
-  const preferred = gatewayOrigins().map((g) => `${g}/graphql`);
+  const preferred = uniqueHttps([extra, ...FREE_GATEWAYS]).map((g) => `${g}/graphql`);
   try {
     const vite = (import.meta as ImportMeta).env?.VITE_ARWEAVE_GQL;
     if (vite) preferred.unshift(vite);

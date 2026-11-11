@@ -7,5 +7,6 @@ indexer-out
 .env.*
 *.jwk
 .vercel
+PLAY.md
 tsconfig.app.tsbuildinfo
 tsconfig.node.tsbuildinfo
