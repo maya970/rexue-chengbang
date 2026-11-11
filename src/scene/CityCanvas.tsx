@@ -2,22 +2,10 @@ import { useEffect, useRef } from "react";
 import { BUILDINGS, CITY_H, CITY_W } from "../engine/catalog";
 import { cityHeightGrid, isCityRoad } from "../engine/plots";
 import type { BuildingId, City, World } from "../types";
-import { blitCity, buildingTile, emptyTile, grassTile, roadTile, walkerTile } from "./cityPixel";
-import { drawBlock, drawIsoSprite, inBlock, landDrop, palette, project, textureIsoTop } from "./iso";
+import { blitCity, emptyTile, grassTile, roadTile, walkerTile } from "./cityPixel";
+import { depthOf, drawBlockFaces, inBlock, palette, project, textureIsoTop, visNeighbor } from "./iso";
+import { drawBuildingMark } from "./isoMarks";
 import { MapTools } from "./MapTools";
-
-const ROOF: Record<BuildingId, { top: string; left: string; right: string }> = {
-  acropolis: { top: "#c83828", left: "#6a1818", right: "#8a2828" },
-  agora: { top: "#e8d090", left: "#7a6840", right: "#a08850" },
-  oikos: { top: "#c06048", left: "#6a3020", right: "#8a4430" },
-  barracks: { top: "#8a8070", left: "#4a4438", right: "#6a6458" },
-  stables: { top: "#a07848", left: "#5a4028", right: "#7a5838" },
-  range: { top: "#5a8848", left: "#2a4a24", right: "#3e6a34" },
-  wall: { top: "#9a9488", left: "#4a4840", right: "#6a6860" },
-  temple: { top: "#f0e8d0", left: "#8a7a58", right: "#b0a070" },
-  shipyard: { top: "#6a88a0", left: "#304050", right: "#486070" },
-  harbor: { top: "#4a90b8", left: "#204858", right: "#306878" },
-};
 
 export function CityCanvas(props: {
   city: City;
@@ -97,8 +85,35 @@ export function CityCanvas(props: {
         const ly = 4;
         const elev = grid[ly]?.[Math.floor(lx)] || 1;
         const p = project(lx, ly, elev, ox, oy, zoom, yaw, CITY_W, CITY_H);
-        return { card, x: p.x - 8 * zoom, y: p.y - 4 * zoom, flip, frame, order: lx + ly };
+        return { card, x: p.x - 8 * zoom, y: p.y - 4 * zoom, flip, frame, order: depthOf(lx, ly, yaw, CITY_W, CITY_H) };
       });
+    }
+
+    function elevCell(grid: number[][], lx: number, ly: number) {
+      if (lx < 0 || ly < 0 || lx >= CITY_W || ly >= CITY_H) return 0;
+      return grid[ly]?.[lx] ?? 0;
+    }
+
+    function faces(grid: number[][], lx: number, ly: number) {
+      const elev = elevCell(grid, lx, ly);
+      const ln = visNeighbor(lx, ly, yaw, CITY_W, CITY_H, "left");
+      const rn = visNeighbor(lx, ly, yaw, CITY_W, CITY_H, "right");
+      return {
+        elev,
+        left: Math.max(0.4, elev - elevCell(grid, ln.x, ln.y)),
+        right: Math.max(0.4, elev - elevCell(grid, rn.x, rn.y)),
+      };
+    }
+
+    function cells(frontFirst: boolean) {
+      const list: { lx: number; ly: number; d: number }[] = [];
+      for (let ly = 0; ly < CITY_H; ly += 1) {
+        for (let lx = 0; lx < CITY_W; lx += 1) {
+          list.push({ lx, ly, d: depthOf(lx, ly, yaw, CITY_W, CITY_H) });
+        }
+      }
+      list.sort((a, b) => (frontFirst ? b.d - a.d : a.d - b.d));
+      return list;
     }
 
     function draw() {
@@ -109,31 +124,24 @@ export function CityCanvas(props: {
       ctx.fillStyle = "#152018";
       ctx.fillRect(0, 0, cssW, cssH);
       const plotAt = (lx: number, ly: number) => (city.plots || []).find((p) => p.lx === lx && p.ly === ly);
-      for (let sum = 0; sum <= CITY_W + CITY_H; sum += 1) {
-        for (let lx = 0; lx < CITY_W; lx += 1) {
-          const ly = sum - lx;
-          if (ly < 0 || ly >= CITY_H) continue;
-          const elev = grid[ly]?.[lx] ?? 0;
-          const se = ly + 1 < CITY_H ? (grid[ly + 1]?.[lx] ?? 0) : 0;
-          const water = elev <= 0;
-          const p = project(lx, ly, water ? 0 : elev, ox, oy, zoom, yaw, CITY_W, CITY_H);
-          const plot = plotAt(lx, ly);
-          const ground = isCityRoad(lx, ly) ? roadTile() : plot ? emptyTile(plot.kind) : grassTile();
-          if (water) {
-            textureIsoTop(ctx, p.x, p.y, zoom, ground);
-          } else {
-            const pal = isCityRoad(lx, ly) ? palette("road") : palette("plot");
-            drawBlock(ctx, p.x, p.y, zoom, landDrop(elev, se), pal.top, pal.left, pal.right);
-            textureIsoTop(ctx, p.x, p.y, zoom, ground);
-          }
-          if (plot?.building) {
-            const roof = ROOF[plot.building];
-            const q = project(lx, ly, water ? 0.4 : elev + 1.15, ox, oy, zoom, yaw, CITY_W, CITY_H);
-            if (!water) {
-              drawBlock(ctx, q.x, q.y, zoom, 1, roof.top, roof.left, roof.right);
-            }
-            drawIsoSprite(ctx, q.x, q.y, zoom, buildingTile(plot.building), 16, 0.38);
-          }
+      for (const cell of cells(false)) {
+        const { lx, ly } = cell;
+        const elev = grid[ly]?.[lx] ?? 0;
+        const water = elev <= 0;
+        const f = faces(grid, lx, ly);
+        const p = project(lx, ly, water ? 0 : elev, ox, oy, zoom, yaw, CITY_W, CITY_H);
+        const plot = plotAt(lx, ly);
+        const ground = isCityRoad(lx, ly) ? roadTile() : plot ? emptyTile(plot.kind) : grassTile();
+        if (water) {
+          textureIsoTop(ctx, p.x, p.y, zoom, ground);
+        } else {
+          const pal = isCityRoad(lx, ly) ? palette("road") : palette("plot");
+          drawBlockFaces(ctx, p.x, p.y, zoom, f.left, f.right, pal.top, pal.left, pal.right);
+          textureIsoTop(ctx, p.x, p.y, zoom, ground);
+        }
+        if (plot?.building) {
+          const q = project(lx, ly, water ? 0.4 : elev + 1.2, ox, oy, zoom, yaw, CITY_W, CITY_H);
+          drawBuildingMark(ctx, q.x, q.y, zoom, plot.building, city.buildings[plot.building]?.level || 1);
         }
       }
       for (const w of walkers(now).sort((a, b) => a.order - b.order)) {
@@ -160,13 +168,11 @@ export function CityCanvas(props: {
         return;
       }
       const city = latest.current.city;
-      for (let sum = CITY_W + CITY_H; sum >= 0; sum -= 1) {
-        for (let lx = CITY_W - 1; lx >= 0; lx -= 1) {
-          const ly = sum - lx;
-          if (ly < 0 || ly >= CITY_H) continue;
+      for (const cell of cells(true)) {
+        const { lx, ly } = cell;
           const elev = grid[ly]?.[lx] ?? 0;
-          const se = ly + 1 < CITY_H ? (grid[ly + 1]?.[lx] ?? 0) : 0;
-          const drop = elev <= 0 ? 0.25 : landDrop(elev, se);
+          const f = faces(grid, lx, ly);
+          const drop = elev <= 0 ? 0.25 : Math.max(f.left, f.right);
           const p = project(lx, ly, elev <= 0 ? 0 : elev, ox, oy, zoom, yaw, CITY_W, CITY_H);
           if (!inBlock(px, py, p.x, p.y, zoom, drop)) continue;
           const plot = (city.plots || []).find((pl) => pl.lx === lx && pl.ly === ly);
@@ -174,7 +180,6 @@ export function CityCanvas(props: {
           if (plot.building) latest.current.onBuilding(plot.building, plot.id);
           else latest.current.onPlot(plot.id);
           return;
-        }
       }
     }
     function onDown(ev: PointerEvent) {

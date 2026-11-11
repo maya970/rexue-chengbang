@@ -11,6 +11,7 @@ export const MARKET_FEE = 0.1;
 export const SUPPLY_PER_SLAVE = 2;
 
 export const COLONIZE_COST = { persons: 3, slaves: 2, supplies: 2 };
+export { SETTLE_COST } from "./hamlets";
 
 export const CITY_W = 12;
 export const CITY_H = 10;
@@ -127,8 +128,9 @@ export const MISSION_NAME: Record<import("../types").MarchMission, string> = {
   destroy: "毁灭",
   occupy: "占领",
   reinforce: "增援",
-  colonize: "开辟殖民市",
-  scout: "侦察",
+  colonize: "开辟独立城邦",
+  scout: "侦察（抢格）",
+  settle: "修建附属乡村",
 };
 
 export function scaleTime(base: number, level: number, speed = 1): number {

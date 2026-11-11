@@ -55,9 +55,12 @@ export type CommandKind =
   | "buy_card"
   | "create_guild"
   | "join_guild"
-  | "leave_guild";
+  | "leave_guild"
+  | "upgrade_site";
 
-export type MarchMission = "plunder" | "massacre" | "destroy" | "occupy" | "reinforce" | "colonize" | "scout";
+export type MarchMission = "plunder" | "massacre" | "destroy" | "occupy" | "reinforce" | "colonize" | "scout" | "settle";
+
+export type HamletKind = "city" | "village" | "suburb" | "urban";
 
 export type SystemRank = "town" | "city" | "metro";
 
@@ -102,6 +105,8 @@ export interface Command {
   burnTx?: string;
   feeTx?: string;
   guildId?: string;
+  /** 一次招募多张。 */
+  count?: number;
 }
 
 export interface CommandBatch {
@@ -163,7 +168,10 @@ export interface Card {
   role: RoleId;
   name: string;
   owner: string;
+  /** 当前驻扎的城或乡村。 */
   cityId: string;
+  /** 编制所属。出征、驻村都不改，招募上限按此计算。 */
+  homeCityId?: string;
   bornAt: number;
   bornTx: string;
   campaigns: Campaign[];
@@ -208,6 +216,11 @@ export interface City {
   wars: Campaign[];
   tribeLevel?: number;
   systemRank?: SystemRank;
+  /** 城邦本体，或附属乡村/郊区/城区。 */
+  hamlet?: HamletKind;
+  parentId?: string;
+  /** 曾经达到过的等级，用于地图 LV.（曾是）。 */
+  peakLevel?: number;
 }
 
 export interface GoneSite {
@@ -270,6 +283,7 @@ export interface BattleReport {
   collapsed?: "atk" | "def";
   rounds: BattleRound[];
   deadNames: string[];
+  deadIds?: string[];
   slaves?: number;
   supplies?: number;
   aftermath?: MarchMission;
@@ -291,6 +305,8 @@ export interface World {
   guilds: Record<string, Guild>;
   memberOf: Record<string, string>;
   guildBanUntil: Record<string, number>;
+  /** 阵亡人物卡永久销毁，折叠历史时不得复活。 */
+  fallen: Record<string, { name: string; owner: string; at: number }>;
   simAt: number;
   digest: string;
 }

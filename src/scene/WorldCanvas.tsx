@@ -1,22 +1,38 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { childrenOf, displayLevel, hamletOf, isHamlet, ownerColor } from "../engine/hamlets";
 import { chartHeights } from "../engine/height";
 import { chartOrigin, CHART, cityIdAt, npcAt, terrainAt } from "../engine/map";
 import { posAt } from "../engine/path";
-import type { City, World } from "../types";
+import { claimOwner } from "../engine/realm";
+import type { World } from "../types";
 import { overlaySprite, terrainSprite, TILE } from "./feTiles";
-import { drawBlock, drawIsoSprite, inBlock, landDrop, palette, project, textureIsoTop, TH, TW } from "./iso";
+import {
+  depthOf,
+  drawBlockFaces,
+  drawLvTag,
+  inBlock,
+  palette,
+  project,
+  textureIsoTop,
+  visNeighbor,
+  TH,
+  TW,
+} from "./iso";
+import { drawCityMark } from "./isoMarks";
 import { MapTools } from "./MapTools";
 
-function kindOf(c: City): "city" | "village" | "tribe" | "ship" {
-  if (c.npc) {
-    const who = c.owner || "";
-    if (who.includes("pirate")) return "ship";
-    if (who.includes("polis")) return "city";
-    if ((c.tribeLevel || 1) <= 3) return "village";
-    return "tribe";
+export type MapViewMode = "terrain" | "claims" | "realm";
+
+function cellsOf(yaw: number, frontFirst: boolean) {
+  const list: { lx: number; ly: number; d: number; rx: number }[] = [];
+  for (let ly = 0; ly < CHART; ly += 1) {
+    for (let lx = 0; lx < CHART; lx += 1) {
+      const d = depthOf(lx, ly, yaw, CHART, CHART);
+      list.push({ lx, ly, d, rx: d });
+    }
   }
-  const lv = (c.buildings.acropolis?.level || 0) + (c.buildings.oikos?.level || 0);
-  return lv <= 3 ? "village" : "city";
+  list.sort((a, b) => (frontFirst ? b.d - a.d : a.d - b.d));
+  return list;
 }
 
 export function WorldCanvas(props: {
@@ -33,6 +49,9 @@ export function WorldCanvas(props: {
   const host = useRef<HTMLDivElement>(null);
   const latest = useRef(props);
   latest.current = props;
+  const [mode, setMode] = useState<MapViewMode>("terrain");
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   const camRef = useRef({
     zoomIn: () => {},
     zoomOut: () => {},
@@ -120,21 +139,43 @@ export function WorldCanvas(props: {
       latest.current = { ...latest.current, view: { x, y } };
     }
 
+    function elevAt(lx: number, ly: number, origin: { x: number; y: number }, grid: number[][]) {
+      if (lx < 0 || ly < 0 || lx >= CHART || ly >= CHART) return 0;
+      if (terrainAt(origin.x + lx, origin.y + ly) === "sea") return 0;
+      return grid[ly]?.[lx] ?? 0;
+    }
+
+    function faces(lx: number, ly: number, origin: { x: number; y: number }, grid: number[][]) {
+      const elev = elevAt(lx, ly, origin, grid);
+      const ln = visNeighbor(lx, ly, yaw, CHART, CHART, "left");
+      const rn = visNeighbor(lx, ly, yaw, CHART, CHART, "right");
+      const le = elevAt(ln.x, ln.y, origin, grid);
+      const re = elevAt(rn.x, rn.y, origin, grid);
+      return {
+        elev,
+        left: Math.max(0.4, elev - le),
+        right: Math.max(0.4, elev - re),
+      };
+    }
+
     function tileAt(px: number, py: number) {
       const { ox, oy, origin, grid, zoom } = cam();
-      for (let sum = CHART * 2; sum >= 0; sum -= 1) {
-        for (let lx = CHART - 1; lx >= 0; lx -= 1) {
-          const ly = sum - lx;
-          if (ly < 0 || ly >= CHART) continue;
-          const elev = grid[ly]?.[lx] ?? 0;
-          const se = ly + 1 < CHART ? (grid[ly + 1]?.[lx] ?? 0) : 0;
-          const t = terrainAt(origin.x + lx, origin.y + ly);
-          const drop = t === "sea" ? 0.25 : landDrop(elev, se);
-          const p = project(lx, ly, t === "sea" ? 0 : elev, ox, oy, zoom, yaw, CHART, CHART);
-          if (inBlock(px, py, p.x, p.y, zoom, drop)) return { x: origin.x + lx, y: origin.y + ly };
-        }
+      for (const c of cellsOf(yaw, true)) {
+        const t = terrainAt(origin.x + c.lx, origin.y + c.ly);
+        const f = t === "sea" ? { elev: 0, left: 0.25, right: 0.25 } : faces(c.lx, c.ly, origin, grid);
+        const p = project(c.lx, c.ly, t === "sea" ? 0 : f.elev, ox, oy, zoom, yaw, CHART, CHART);
+        if (inBlock(px, py, p.x, p.y, zoom, Math.max(f.left, f.right))) return { x: origin.x + c.lx, y: origin.y + c.ly };
       }
       return origin;
+    }
+
+    function diamond(p: { x: number; y: number }, zoom: number) {
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x + (TW * zoom) / 2, p.y + (TH * zoom) / 2);
+      ctx.lineTo(p.x, p.y + TH * zoom);
+      ctx.lineTo(p.x - (TW * zoom) / 2, p.y + (TH * zoom) / 2);
+      ctx.closePath();
     }
 
     function draw() {
@@ -142,46 +183,85 @@ export function WorldCanvas(props: {
       const { cssW, cssH, ox, oy, origin, grid, zoom } = cam();
       const frame = Math.floor(now / 380) % 2;
       const walk = Math.floor(now / 220) % 2;
+      const viewMode = modeRef.current;
       ctx.imageSmoothingEnabled = false;
       ctx.fillStyle = "#0a2430";
       ctx.fillRect(0, 0, cssW, cssH);
 
-      for (let sum = 0; sum <= CHART * 2; sum += 1) {
-        for (let lx = 0; lx < CHART; lx += 1) {
-          const ly = sum - lx;
-          if (ly < 0 || ly >= CHART) continue;
-          const tx = origin.x + lx;
-          const ty = origin.y + ly;
-          const t = terrainAt(tx, ty);
-          const elev = t === "sea" ? 0 : (grid[ly]?.[lx] ?? 0);
-          const se = ly + 1 < CHART && terrainAt(tx, ty + 1) !== "sea" ? (grid[ly + 1]?.[lx] ?? 0) : 0;
-          const p = project(lx, ly, elev, ox, oy, zoom, yaw, CHART, CHART);
-          const spr = terrainSprite(t, tx, ty, frame);
-          if (t === "sea") {
-            textureIsoTop(ctx, p.x, p.y, zoom, spr, false);
-            continue;
-          }
+      for (const cell of cellsOf(yaw, false)) {
+        const { lx, ly } = cell;
+        const tx = origin.x + lx;
+        const ty = origin.y + ly;
+        const t = terrainAt(tx, ty);
+        const f = faces(lx, ly, origin, grid);
+        const p = project(lx, ly, t === "sea" ? 0 : f.elev, ox, oy, zoom, yaw, CHART, CHART);
+        const spr = terrainSprite(t, tx, ty, frame);
+        if (t === "sea") {
+          textureIsoTop(ctx, p.x, p.y, zoom, spr, false);
+        } else {
           const pal = palette(t, frame);
-          drawBlock(ctx, p.x, p.y, zoom, landDrop(elev, se), pal.top, pal.left, pal.right);
+          drawBlockFaces(ctx, p.x, p.y, zoom, f.left, f.right, pal.top, pal.left, pal.right);
           textureIsoTop(ctx, p.x, p.y, zoom, spr);
+        }
+        if (viewMode === "claims") {
+          const who = claimOwner(world, tx, ty);
+          if (who) {
+            diamond(p, zoom);
+            ctx.fillStyle = ownerColor(who, who === address ? 0.48 : 0.32);
+            ctx.fill();
+          }
         }
       }
 
-      for (const c of Object.values(world.cities)) {
-        if (c.x < origin.x || c.y < origin.y || c.x >= origin.x + CHART || c.y >= origin.y + CHART) continue;
+      if (viewMode === "realm") {
+        for (const c of Object.values(world.cities)) {
+          if (isHamlet(c)) continue;
+          const kids = childrenOf(world, c.id);
+          const hue = ((c.x * 13 + c.y * 29) % 360 + 360) % 360;
+          for (const k of kids) {
+            if (k.x < origin.x || k.y < origin.y || k.x >= origin.x + CHART || k.y >= origin.y + CHART) continue;
+            if (c.x < origin.x || c.y < origin.y || c.x >= origin.x + CHART || c.y >= origin.y + CHART) continue;
+            const a = project(c.x - origin.x, c.y - origin.y, 1, ox, oy, zoom, yaw, CHART, CHART);
+            const b = project(k.x - origin.x, k.y - origin.y, 1, ox, oy, zoom, yaw, CHART, CHART);
+            ctx.strokeStyle = `hsla(${hue}, 55%, 62%, 0.7)`;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y + TH * zoom * 0.4);
+            ctx.lineTo(b.x, b.y + TH * zoom * 0.4);
+            ctx.stroke();
+            const kp = project(k.x - origin.x, k.y - origin.y, 0.4, ox, oy, zoom, yaw, CHART, CHART);
+            diamond(kp, zoom);
+            ctx.fillStyle = hamletOf(k) === "urban" ? "rgba(232,208,144,0.45)" : hamletOf(k) === "suburb" ? "rgba(200,160,96,0.4)" : "rgba(160,120,64,0.38)";
+            ctx.fill();
+          }
+        }
+      }
+
+      const marks = Object.values(world.cities)
+        .filter((c) => c.x >= origin.x && c.y >= origin.y && c.x < origin.x + CHART && c.y < origin.y + CHART)
+        .sort((a, b) => depthOf(a.x - origin.x, a.y - origin.y, yaw, CHART, CHART) - depthOf(b.x - origin.x, b.y - origin.y, yaw, CHART, CHART));
+
+      for (const c of marks) {
         const lx = Math.floor(c.x - origin.x);
         const ly = Math.floor(c.y - origin.y);
         const t = terrainAt(c.x, c.y);
         const elev = t === "sea" ? 0 : (grid[ly]?.[lx] ?? 0);
-        const q = project(lx, ly, elev, ox, oy, zoom, yaw, CHART, CHART);
-        const kind = kindOf(c);
-        drawIsoSprite(ctx, q.x, q.y, zoom, overlaySprite(kind), TILE, 0.9);
+        const q = project(lx, ly, elev + 0.85, ox, oy, zoom, yaw, CHART, CHART);
+        drawCityMark(ctx, q.x, q.y, zoom, c);
+        const lv = displayLevel(c);
+        const peak = c.peakLevel || lv;
+        drawLvTag(ctx, q.x, q.y - 10 * zoom, zoom, lv, peak);
         if (c.owner === address) {
-          drawIsoSprite(ctx, q.x + 3 * zoom, q.y, zoom * 0.85, overlaySprite("flag"), 8, 0.42);
+          const f = project(lx, ly, elev + 1.6, ox, oy, zoom, yaw, CHART, CHART);
+          ctx.drawImage(overlaySprite("flag"), f.x + 4 * zoom, f.y - 8 * zoom, 8 * zoom, 8 * zoom);
         }
       }
 
-      for (const m of Object.values(world.marches)) {
+      for (const m of Object.values(world.marches).sort((a, b) => {
+        const pa = posAt(a.path, a.startAt, a.arriveAt, now);
+        const pb = posAt(b.path, b.startAt, b.arriveAt, now);
+        return depthOf(pa.x - origin.x, pa.y - origin.y, yaw, CHART, CHART) - depthOf(pb.x - origin.x, pb.y - origin.y, yaw, CHART, CHART);
+      })) {
         const pos = posAt(m.path, m.startAt, m.arriveAt, now);
         if (pos.x < origin.x || pos.y < origin.y || pos.x >= origin.x + CHART || pos.y >= origin.y + CHART) continue;
         const lx = pos.x - origin.x;
@@ -189,7 +269,7 @@ export function WorldCanvas(props: {
         const t = terrainAt(Math.floor(pos.x), Math.floor(pos.y));
         const elev = t === "sea" ? 0 : (grid[Math.floor(ly)]?.[Math.floor(lx)] || 0);
         const q = project(lx, ly, elev, ox, oy, zoom, yaw, CHART, CHART);
-        drawIsoSprite(ctx, q.x, q.y - walk, zoom, overlaySprite("army", walk), TILE, 0.9);
+        ctx.drawImage(overlaySprite("army", walk), q.x - 8 * zoom, q.y - 6 * zoom - walk, TILE * zoom * 0.7, TILE * zoom * 0.7);
       }
 
       if (selected && selected.x >= origin.x && selected.y >= origin.y && selected.x < origin.x + CHART && selected.y < origin.y + CHART) {
@@ -200,12 +280,7 @@ export function WorldCanvas(props: {
         const p = project(lx, ly, elev, ox, oy, zoom, yaw, CHART, CHART);
         ctx.strokeStyle = "#f8f0a8";
         ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(p.x, p.y);
-        ctx.lineTo(p.x + (TW * zoom) / 2, p.y + (TH * zoom) / 2);
-        ctx.lineTo(p.x, p.y + TH * zoom);
-        ctx.lineTo(p.x - (TW * zoom) / 2, p.y + (TH * zoom) / 2);
-        ctx.closePath();
+        diamond(p, zoom);
         ctx.stroke();
       }
     }
@@ -303,6 +378,13 @@ export function WorldCanvas(props: {
         onZoomOut={() => camRef.current.zoomOut()}
         onRotate={() => camRef.current.rotate()}
         onReset={() => camRef.current.reset()}
+        extra={(
+          <>
+            <button className={`btn tiny${mode === "terrain" ? " primary" : ""}`} type="button" onClick={() => setMode("terrain")}>地形</button>
+            <button className={`btn tiny${mode === "claims" ? " primary" : ""}`} type="button" onClick={() => setMode("claims")}>连通图</button>
+            <button className={`btn tiny${mode === "realm" ? " primary" : ""}`} type="button" onClick={() => setMode("realm")}>城域</button>
+          </>
+        )}
       />
     </div>
   );

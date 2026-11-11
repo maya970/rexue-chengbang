@@ -115,8 +115,15 @@ export function resolveFight(input: FightInput): FightResult {
   const bits = bitStream(input.entropy + "|" + input.id);
   const rounds: BattleRound[] = [];
   const dead: Card[] = [];
-  const war: Campaign = { id: input.id, name: input.warName, time: input.time };
-  for (const c of [...input.atkPeople, ...input.defPeople, ...input.atkShips, ...input.defShips]) addWar(c, war);
+  const atkWar: Campaign = { id: `${input.id}:atk`, name: `进攻·${input.warName}`, time: input.time };
+  const defWar: Campaign = { id: `${input.id}:def`, name: `守城·${input.warName}`, time: input.time };
+  const fieldWar: Campaign = { id: `${input.id}:field`, name: `野战·${input.warName}`, time: input.time };
+  if (input.field) {
+    for (const c of [...input.atkPeople, ...input.atkShips, ...input.defPeople, ...input.defShips]) addWar(c, fieldWar);
+  } else {
+    for (const c of [...input.atkPeople, ...input.atkShips]) addWar(c, atkWar);
+    for (const c of [...input.defPeople, ...input.defShips]) addWar(c, defWar);
+  }
 
   let atkShips = [...input.atkShips];
   let defShips = [...input.defShips];
@@ -213,6 +220,7 @@ export function resolveFight(input: FightInput): FightResult {
     collapsed,
     rounds,
     deadNames: [...new Set(dead.map((c) => c.name))],
+    deadIds: [...new Set(dead.map((c) => c.id))],
   };
   void atkN0;
   void defN0;

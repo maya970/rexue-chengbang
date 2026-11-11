@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BUILDINGS, COLONIZE_COST, MISSION_NAME, PLOT_NAME, PLOT_TIME, ROLES, scaleTime, SUPPLY_PER_SLAVE } from "./engine/catalog";
+import { canFoundVillage, childrenOf, cityLevelCap, hamletLabel, hamletOf, isHamlet, SITE_UPGRADE } from "./engine/hamlets";
 import { canColonize, chartName, chartOf, cityIdAt, npcAt, terrainAt, tileName } from "./engine/map";
 import { planPath } from "./engine/path";
 import { canBuildOn, plotTimeMult } from "./engine/plots";
 import { empireTimeFactor, slaveCostFor, workersFor } from "./engine/site";
-import { adjacentClaimed, claimsGap, isClaimed } from "./engine/realm";
-import { alliesOf, buildSlotsOf, citizensOf, corridorBlocked, idleSlaves, idleSupply, idleWorkers, recruitCapOf, roleCapOf, roleCountOf, worksOf } from "./engine/simulate";
+import { adjacentClaimed, claimOwner, claimsGap, isClaimed } from "./engine/realm";
+import { alliesOf, buildSlotsOf, citizensOf, corridorBlocked, homeOf, idleSlaves, idleSupply, idleWorkers, recruitCapOf, roleCapOf, roleCountOf, worksOf } from "./engine/simulate";
 import { loadInbox, mergeInbox } from "./lib/inbox";
 import { HelpBoard } from "./i18n/HelpBoard";
 import { LangSelect, useI18n } from "./i18n";
 import { formatReport, reportHay } from "./i18n/report";
 import { useGame } from "./hooks/useGame";
 import { makeCommand, statusLabel } from "./lib/cmd";
-import { arToWinston, winstonToAr } from "./lib/market";
 import { shortAddr } from "./lib/wallet";
 import { AtlasCanvas } from "./scene/AtlasCanvas";
 import { CityCanvas } from "./scene/CityCanvas";
@@ -25,20 +25,12 @@ function remain(ms: number, now: number) {
   return m > 0 ? `${m}分${s % 60}秒` : `${s}秒`;
 }
 
-type Modal = "none" | "tile" | "city" | "recruit" | "squad" | "build" | "card" | "reports" | "market" | "guild" | "atlas" | "help";
+type Modal = "none" | "tile" | "city" | "recruit" | "squad" | "build" | "card" | "reports" | "guild" | "atlas" | "help";
 type RosterTab = "cities" | "people" | "slaves" | "goods" | "marches";
-type BoardCat = "all" | "win" | "lose" | "scout" | "colonize" | "fight" | "reinforce" | "mine" | "join" | "big" | "foot" | "bow" | "horse" | "navy" | "cheap";
+type BoardCat = "all" | "win" | "lose" | "scout" | "colonize" | "fight" | "reinforce" | "mine" | "join" | "big";
 
 function hay(parts: (string | number | undefined)[]) {
   return parts.filter((x) => x !== undefined).join(" ").toLowerCase();
-}
-
-function marketBucket(role?: string) {
-  if (role === "toxotes") return "bow";
-  if (role === "hippeus") return "horse";
-  if (role === "epibatai" || role === "trierarch") return "navy";
-  if (role === "hoplite" || role === "peltast" || role === "citizen") return "foot";
-  return "other";
 }
 
 export function App() {
@@ -53,7 +45,7 @@ export function App() {
   const [mission, setMission] = useState<MarchMission>("plunder");
   const [buildId, setBuildId] = useState<BuildingId>("oikos");
   const [cardId, setCardId] = useState<string>("");
-  const [listAr, setListAr] = useState("0.1");
+  const [recruitQty, setRecruitQty] = useState<Partial<Record<RoleId, number>>>({});
   const [rosterOpen, setRosterOpen] = useState(false);
   const [cityPins, setCityPins] = useState<{ id: string; name: string; x: number; y: number }[]>(() => {
     try {
@@ -85,10 +77,10 @@ export function App() {
   const origin = g.myCities.find((c) => c.id === fromCityId) || g.myCities[0] || null;
   const mine = Boolean(city && g.address && city.owner === g.address);
   const here = city && mine
-    ? Object.values(g.world.cards).filter((c) => c.owner === g.address && c.cityId === city.id && !c.marchId)
+    ? Object.values(sim.cards).filter((c) => c.owner === g.address && c.cityId === city.id && !c.marchId && !sim.fallen?.[c.id])
     : [];
   const originHere = origin && g.address
-    ? Object.values(g.world.cards).filter((c) => c.owner === g.address && c.cityId === origin.id && !c.marchId)
+    ? Object.values(sim.cards).filter((c) => c.owner === g.address && c.cityId === origin.id && !c.marchId && !sim.fallen?.[c.id])
     : [];
   const people = here.filter((c) => c.kind === "person" || c.kind === "slave");
   const originPeople = originHere.filter((c) => c.kind === "person" || c.kind === "slave");
@@ -103,23 +95,24 @@ export function App() {
   const blocked = origin && path?.ok && mission !== "scout"
     ? corridorBlocked(sim, path.tiles, g.address, sel!.x, sel!.y)
     : null;
-  const claimMiss = origin && path?.ok && sel && mission === "colonize"
+  const claimMiss = origin && path?.ok && sel && (mission === "colonize" || mission === "settle")
     ? claimsGap(sim, g.address, path.tiles, sel.x, sel.y)
     : null;
-  const seaColonize = Boolean(sel && mission === "colonize" && !canColonize(terrainAt(sel.x, sel.y)));
+  const villageMiss = origin && sel && mission === "settle" ? canFoundVillage(sim, g.address, origin, sel.x, sel.y) : null;
+  const seaColonize = Boolean(sel && (mission === "colonize" || mission === "settle") && !canColonize(terrainAt(sel.x, sel.y)));
   const warMission = mission === "plunder" || mission === "massacre" || mission === "destroy" || mission === "occupy";
   const friendlyFire = Boolean(selCity && g.address && warMission && alliesOf(sim, g.address).has(selCity.owner));
   const myGuildId = g.address ? sim.memberOf?.[g.address] : "";
   const myGuild = myGuildId ? sim.guilds?.[myGuildId] : undefined;
   const focusPlot = city?.plots?.find((p) => p.id === plotId);
-  const peopleN = city && mine ? Object.values(g.world.cards).filter((c) => c.cityId === city.id && c.kind === "person").length : 0;
+  const peopleN = city && mine ? Object.values(sim.cards).filter((c) => homeOf(c) === city.id && c.kind === "person" && !sim.fallen?.[c.id]).length : 0;
   const slaveN = slaves.length;
   const timeFactor = empireTimeFactor(
     g.myCities.length,
     Object.values(sim.cards).filter((c) => c.owner === g.address && c.kind === "person").length,
     Object.values(sim.cards).filter((c) => c.owner === g.address && c.kind === "slave").length,
   );
-  const focusCard = cardId ? g.world.cards[cardId] || sim.cards[cardId] : undefined;
+  const focusCard = cardId && !sim.fallen?.[cardId] ? sim.cards[cardId] : undefined;
   const incoming = useMemo(
     () => Object.values(sim.marches).filter((m) => city && m.toX === city.x && m.toY === city.y && m.owner !== g.address),
     [sim.marches, city, g.address],
@@ -166,14 +159,14 @@ export function App() {
     setModal("reports");
   }
 
-  function openBoard(kind: "market" | "guild" | "atlas" | "help") {
+  function openBoard(kind: "guild" | "atlas" | "help") {
     setBoardQ("");
     setBoardCat("all");
     setRosterOpen(false);
     setModal(kind);
   }
 
-  const boardModal = modal === "reports" || modal === "market" || modal === "guild" || modal === "atlas" || modal === "help";
+  const boardModal = modal === "reports" || modal === "guild" || modal === "atlas" || modal === "help";
 
   const filteredReports = useMemo(() => {
     const q = boardQ.trim().toLowerCase();
@@ -188,21 +181,6 @@ export function App() {
       return hay([r.x, r.y, reportHay(locale, r), ...(r.deadNames || [])]).includes(q);
     });
   }, [mineReports, boardQ, boardCat, locale]);
-
-  const filteredListings = useMemo(() => {
-    const q = boardQ.trim().toLowerCase();
-    const rows = Object.values(sim.listings).map((listing) => ({ listing, card: sim.cards[listing.cardId] }));
-    const next = rows.filter(({ listing, card }) => {
-      if (boardCat === "mine" && listing.seller !== g.address) return false;
-      if (boardCat === "foot" || boardCat === "bow" || boardCat === "horse" || boardCat === "navy") {
-        if (marketBucket(card?.role) !== boardCat) return false;
-      }
-      if (!q) return true;
-      return hay([card?.name, card?.role, card?.role ? ROLES[card.role].name : "", listing.seller, winstonToAr(listing.winston)]).includes(q);
-    });
-    if (boardCat === "cheap") next.sort((a, b) => a.listing.winston - b.listing.winston);
-    return next;
-  }, [sim.listings, sim.cards, boardQ, boardCat, g.address]);
 
   const filteredGuilds = useMemo(() => {
     const q = boardQ.trim().toLowerCase();
@@ -250,8 +228,8 @@ export function App() {
   }
 
   const myCards = useMemo(
-    () => Object.values(sim.cards).filter((c) => c.owner === g.address),
-    [sim.cards, g.address],
+    () => Object.values(sim.cards).filter((c) => c.owner === g.address && !sim.fallen?.[c.id]),
+    [sim.cards, sim.fallen, g.address],
   );
   const myMarches = useMemo(
     () => Object.values(sim.marches).filter((m) => m.owner === g.address),
@@ -311,7 +289,6 @@ export function App() {
           <button className="btn tiny" onClick={openReports}>
             {t("reports")}{unreadReports.length ? ` ${unreadReports.length}` : ""}
           </button>
-          <button className="btn tiny" onClick={() => openBoard("market")}>{t("market")}</button>
           <button className="btn tiny" onClick={() => openBoard("guild")}>{t("guild")}</button>
           <button className="btn tiny" onClick={() => openBoard("atlas")}>{t("atlas")}</button>
           <button className="btn tiny" onClick={() => openBoard("help")}>{t("help")}</button>
@@ -412,7 +389,7 @@ export function App() {
               {rosterTab === "cities" ? (
                 rosterCities.length ? rosterCities.map((c) => (
                   <div className="card" key={c.id}>
-                    <div>{c.name}<small>({c.x},{c.y}){"wars" in c && Array.isArray(c.wars) ? ` · 战${c.wars.length}` : ""}</small></div>
+                    <div>{c.name}<small>({c.x},{c.y}){sim.cities[c.id] ? ` · ${hamletLabel(hamletOf(sim.cities[c.id]))}` : ""}</small></div>
                     <div className="row">
                       <button className="btn tiny" onClick={() => jumpCity(c.id)}>定位</button>
                       <button className="btn tiny" onClick={() => jumpCity(c.id, true)}>进入</button>
@@ -506,7 +483,7 @@ export function App() {
                 ) : (
                   <p>
                     {g.myCities.length
-                      ? `第二座城必须与已打下来的格子连通。出征「开辟殖民市」：人物卡 ${COLONIZE_COST.persons}，消耗奴隶 ${COLONIZE_COST.slaves}、物资 ${COLONIZE_COST.supplies}。侦察邻格可占领空地。公会共享连通。海域不能殖民。不能攻击自己或同公会成员。`
+                      ? `这是抢格子的游戏。侦察可夺他人空地（海域不行）；已有城邦或乡村的格子必须直接进攻。侦察敌方乡村会抢劫该村。开辟独立城邦与修建附属乡村是两回事。出征、驻村的人仍占出发城编制，不能空出名额再招。`
                       : terrainAt(sel.x, sel.y) === "sea"
                         ? "第一座城可以建在海域，建成海港城，自带港口、船厂和运输船。"
                         : terrainAt(sel.x, sel.y) === "mountain"
@@ -516,12 +493,25 @@ export function App() {
                 )}
                 {g.address && sel ? (
                   <p className="muted">
-                    {isClaimed(sim, g.address, sel.x, sel.y) ? "此格已打下来（你或公会）" : adjacentClaimed(sim, g.address, sel.x, sel.y) ? "邻格已连通，侦察此格可打下空地" : "尚未连通"}
+                    {selCity
+                      ? isHamlet(selCity)
+                        ? selCity.owner === g.address
+                          ? "这是你的附属乡村，可增援驻军。要占地须进攻别人的乡村。"
+                          : "敌方乡村：侦察会抢劫；占地请直接进攻占领。"
+                        : "已有城邦，侦察只能探听，占地必须进攻。"
+                      : terrainAt(sel.x, sel.y) === "sea"
+                        ? "海域不能抢格"
+                        : isClaimed(sim, g.address, sel.x, sel.y)
+                          ? "此格已是你的连通"
+                          : claimOwner(sim, sel.x, sel.y)
+                            ? "他人空地：侦察可抢夺此格"
+                            : "无主空地：侦察可夺下此格"}
                   </p>
                 ) : null}
                 {path?.ok ? <p className="muted">{path.naval ? "海路" : "陆路"} {path.dist} 格</p> : path && !path.ok ? <p className="err">{path.reason}</p> : null}
                 {blocked ? <p className="err">{blocked}</p> : null}
                 {claimMiss ? <p className="err">{claimMiss}</p> : null}
+                {villageMiss ? <p className="err">{villageMiss}</p> : null}
                 {seaColonize ? <p className="err">海域不能殖民，请选海岸或陆地。</p> : null}
                 {friendlyFire ? <p className="err">{selCity?.owner === g.address ? "不能攻击自己的城。" : "不能攻击同公会成员。"}</p> : null}
                 {!g.address ? <p>先创建钱包。</p> : null}
@@ -543,31 +533,45 @@ export function App() {
                   </>
                 ) : null}
                 {ownSel ? (
-                  <button className="btn" onClick={() => enterOwnCity(selCity!.id)}>进入城市</button>
+                  <button className="btn" onClick={() => enterOwnCity(selCity!.id)}>{isHamlet(selCity!) ? "进入乡村" : "进入城市"}</button>
                 ) : null}
                 {origin && sel ? (
                   <>
                     <p>出征必须指定<strong>出发城邦</strong>和<strong>将士</strong>。点地块只是目标，不会自动派兵。</p>
-                    <label className="muted">出发城邦
+                    <label className="muted">出发城邦或乡村
                       <select value={origin.id} onChange={(e) => {
                         setFromCityId(e.target.value);
                         g.setFocusCityId(e.target.value);
                       }}>
-                        {g.myCities.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.x},{c.y})</option>)}
+                        {g.myCities.map((c) => <option key={c.id} value={c.id}>{c.name} · {hamletLabel(hamletOf(c))} ({c.x},{c.y})</option>)}
                       </select>
                     </label>
                     <div className="row">
                       <select value={mission} onChange={(e) => setMission(e.target.value as MarchMission)}>
                         {(Object.keys(MISSION_NAME) as MarchMission[]).filter((m) => {
                           if (m === "destroy" && selCity?.systemRank) return false;
-                          if (m === "colonize" && sel && !canColonize(terrainAt(sel.x, sel.y))) return false;
+                          if ((m === "colonize" || m === "settle") && sel && !canColonize(terrainAt(sel.x, sel.y))) return false;
+                          if (m === "colonize" && (selCity || (origin && isHamlet(origin)))) return false;
+                          if (m === "settle" && (selCity || (origin && isHamlet(origin)))) return false;
                           if ((m === "plunder" || m === "massacre" || m === "destroy" || m === "occupy") && selCity && g.address && alliesOf(sim, g.address).has(selCity.owner)) return false;
                           return true;
                         }).map((m) => <option key={m} value={m}>{MISSION_NAME[m]}</option>)}
                       </select>
-                      <button className="btn primary" onClick={() => setModal("squad")} disabled={(Boolean(blocked) && mission !== "scout") || Boolean(claimMiss) || seaColonize || friendlyFire}>挑选将士出征</button>
+                      <button className="btn primary" onClick={() => setModal("squad")} disabled={(Boolean(blocked) && mission !== "scout") || Boolean(claimMiss) || Boolean(villageMiss) || seaColonize || friendlyFire}>挑选将士出征</button>
                     </div>
-                    <p className="muted">当前从 {origin.name} 出发，本城可派 {originPeople.filter((c) => !c.jobId).length} 人。</p>
+                    {mission === "scout" && selCity && isHamlet(selCity) && selCity.owner !== g.address ? (
+                      <p className="err">侦察敌方乡村会抢劫该村，不能夺格。要占地请改占领或屠城。</p>
+                    ) : null}
+                    {mission === "scout" && selCity && !isHamlet(selCity) ? (
+                      <p className="muted">侦察城邦只能探听驻军，不能夺格。</p>
+                    ) : null}
+                    {mission === "colonize" ? <p className="muted">开辟的是独立城邦，不是乡村。</p> : null}
+                    {mission === "settle" ? <p className="muted">修建的是附属乡村，归 {origin.name} 所有，一圈圈外扩。</p> : null}
+                    {mission === "reinforce" ? <p className="muted">增援可把军队驻进自己的城或乡村。编制仍算出发城，不会空出名额。</p> : null}
+                    {mission === "occupy" || mission === "destroy" || mission === "massacre" || mission === "plunder" ? (
+                      <p className="muted">进攻须先侦察抢走路上空地。挡路的乡村要占领或毁灭，劫掠不能开路。要留下城请用占领或屠城；毁灭会抹掉玩家城。</p>
+                    ) : null}
+                    <p className="muted">当前从 {origin.name} 出发，此地可派 {originPeople.filter((c) => !c.jobId).length} 人。</p>
                   </>
                 ) : null}
               </>
@@ -575,13 +579,38 @@ export function App() {
 
             {modal === "city" && city && mine ? (
               <>
-                <h3>{city.name}</h3>
-                <p>公民 {citizensOf(city, sim)} · 招募上限 {recruitCapOf(city)} · 成果 {worksOf(city, sim)} · 本城奴隶 {slaveN} · 物资 {goods.length}</p>
-                <p className="muted">奴隶不能招募。物资可买奴隶，奴隶可转公民。建造占用监工人物卡和物资/奴隶，完成后才释放。</p>
+                <h3>{city.name} · {hamletLabel(hamletOf(city))} LV.{city.buildings.acropolis?.level || 1}{city.peakLevel && city.peakLevel > (city.buildings.acropolis?.level || 1) ? ` (曾${city.peakLevel})` : ""}</h3>
+                <p>公民 {citizensOf(city, sim)} · 军队编制 {peopleN}/{recruitCapOf(city)}（出征、驻村仍占名额） · 成果 {worksOf(city, sim)} · 本城奴隶 {slaveN} · 物资 {goods.length}</p>
+                {isHamlet(city) ? (
+                  <p className="muted">
+                    附属 {sim.cities[city.parentId || ""]?.name || "城邦"}。
+                    {hamletOf(city) !== "urban"
+                      ? `升格为${hamletLabel(SITE_UPGRADE[hamletOf(city) as "village" | "suburb"].to)}：物资 ${SITE_UPGRADE[hamletOf(city) as "village" | "suburb"].supplies}、奴隶 ${SITE_UPGRADE[hamletOf(city) as "village" | "suburb"].slaves}。`
+                      : "已是城区，解锁最多。"}
+                  </p>
+                ) : (
+                  <p className="muted">
+                    建筑等级上限 {cityLevelCap(sim, city)}（基础 4 + 下属乡村合计）。
+                    附属 {childrenOf(sim, city.id).length} 处：
+                    {childrenOf(sim, city.id).map((v) => `${hamletLabel(hamletOf(v))}`).join("、") || "无"}。
+                    乡村必须一圈圈向外连通。
+                  </p>
+                )}
                 <div className="row">
                   <button className="btn" onClick={() => setModal("recruit")}>招募 / 买奴</button>
                   <button className="btn" onClick={() => setModal("squad")}>出征</button>
                   <button className="btn" onClick={() => setModal("build")}>建筑</button>
+                  {isHamlet(city) && hamletOf(city) !== "urban" ? (
+                    <button className="btn primary" onClick={() => {
+                      const step = SITE_UPGRADE[hamletOf(city) as "village" | "suburb"];
+                      g.addCommand(makeCommand({
+                        kind: "upgrade_site",
+                        cityId: city.id,
+                        label: `升格 ${city.name} 为${hamletLabel(step.to)}`,
+                      }));
+                      setModal("none");
+                    }}>升格为{hamletLabel(SITE_UPGRADE[hamletOf(city) as "village" | "suburb"].to)}</button>
+                  ) : null}
                 </div>
               </>
             ) : null}
@@ -640,8 +669,8 @@ export function App() {
 
             {modal === "recruit" && city && mine ? (
               <>
-                <h3>招募 总上限 {recruitCapOf(city)}</h3>
-                <p className="muted">奴隶不能招募。用 {SUPPLY_PER_SLAVE} 张本城物资买一张奴隶，或把奴隶转成公民。每种兵由对应建筑等级决定上限；弓手站第二排放箭，但更脆弱。</p>
+                <h3>招募 总上限 {recruitCapOf(city)} · 已有编制 {peopleN}</h3>
+                <p className="muted">编制含出征与驻外（乡村）的人，出征不会空出名额再招。奴隶不能招募。用 {SUPPLY_PER_SLAVE} 张本城物资买一张奴隶，或把奴隶转成公民。每种兵由对应建筑等级决定上限。</p>
                 <button className="btn" onClick={() => {
                   g.addCommand(makeCommand({ kind: "buy_slave", label: `买奴隶（耗物资${SUPPLY_PER_SLAVE}）`, cityId: city.id }));
                   setModal("none");
@@ -658,16 +687,35 @@ export function App() {
                 {(Object.keys(ROLES) as RoleId[]).filter((r) => (ROLES[r].kind === "person" && r !== "citizen") || ROLES[r].kind === "ship").map((role) => {
                   const cap = roleCapOf(city, role);
                   const have = roleCountOf(sim, city.id, role);
+                  const room = cap === 99 ? 20 : Math.max(0, cap - have);
+                  const qty = Math.max(1, Math.min(room || 1, recruitQty[role] || 1));
                   return (
                     <div className="card" key={role}>
                       <div>
                         {ROLES[role].name}
                         <small>{ROLES[role].blurb} · {have}/{cap === 99 ? "—" : cap}</small>
                       </div>
-                      <button className="btn tiny" disabled={cap !== 99 && have >= cap} onClick={() => {
-                        g.addCommand(makeCommand({ kind: "recruit", label: `招募 ${ROLES[role].name}`, cityId: city.id, role }));
-                        setModal("none");
-                      }}>加入</button>
+                      <div className="row">
+                        <input
+                          type="number"
+                          min={1}
+                          max={Math.max(1, room)}
+                          value={qty}
+                          disabled={room < 1}
+                          onChange={(e) => setRecruitQty((prev) => ({ ...prev, [role]: Math.max(1, Math.floor(Number(e.target.value) || 1)) }))}
+                          style={{ width: 64 }}
+                        />
+                        <button className="btn tiny" disabled={room < 1} onClick={() => {
+                          g.addCommand(makeCommand({
+                            kind: "recruit",
+                            label: `招募 ${ROLES[role].name} ×${qty}`,
+                            cityId: city.id,
+                            role,
+                            count: qty,
+                          }));
+                          setModal("none");
+                        }}>加入 {qty} 人</button>
+                      </div>
                     </div>
                   );
                 })}
@@ -695,7 +743,7 @@ export function App() {
                   </label>
                 ))}
                 {sel ? (
-                  <button className="btn primary" disabled={(Boolean(blocked) && mission !== "scout") || pickedP.length === 0 || seaColonize || friendlyFire} onClick={() => {
+                  <button className="btn primary" disabled={(Boolean(blocked) && mission !== "scout") || pickedP.length === 0 || seaColonize || friendlyFire || Boolean(villageMiss)} onClick={() => {
                     g.addCommand(makeCommand({
                       kind: "march",
                       label: `${MISSION_NAME[mission]} 从${origin.name} → (${sel.x},${sel.y})`,
@@ -716,24 +764,22 @@ export function App() {
             {modal === "card" && focusCard ? (
               <>
                 <h3>{focusCard.name}</h3>
-                <p>{ROLES[focusCard.role]?.name} · {focusCard.kind === "slave" ? "奴隶" : focusCard.kind === "supply" ? "物资" : "人物"}</p>
+                <p className="muted">人物简介</p>
+                <p>{ROLES[focusCard.role]?.name} · {focusCard.kind === "slave" ? "奴隶" : focusCard.kind === "supply" ? "物资" : "人物"} · {cityNameOf(focusCard.cityId)}</p>
+                {ROLES[focusCard.role]?.blurb ? <p className="muted">{ROLES[focusCard.role].blurb}</p> : null}
                 {focusCard.kind === "person" || focusCard.kind === "slave" ? (
-                  <p>战役：{focusCard.campaigns.length ? focusCard.campaigns.map((w) => w.name).join("、") : "尚未上阵"}</p>
-                ) : null}
-                {focusCard.kind === "person" && focusCard.owner === g.address && !focusCard.listedWinston ? (
-                  <div className="row">
-                    <input value={listAr} onChange={(e) => setListAr(e.target.value)} />
-                    <button className="btn" onClick={() => {
-                      const winston = arToWinston(Number(listAr) || 0);
-                      g.addCommand(makeCommand({
-                        kind: "list_card",
-                        label: `上架 ${focusCard.name}（定价 ${winstonToAr(winston)} AR，上架免费）`,
-                        cardId: focusCard.id,
-                        priceWinston: winston,
-                      }));
-                      setModal("none");
-                    }}>上架（免费，成交抽10%手续费）</button>
-                  </div>
+                  <>
+                    <p>作战履历 {focusCard.campaigns.length} 场（进攻、守城、野战都记入，不只记进攻）</p>
+                    {focusCard.campaigns.length ? (
+                      <ul className="bio-wars">
+                        {focusCard.campaigns.slice().reverse().slice(0, 24).map((w) => (
+                          <li key={w.id}>{w.name}{w.time ? ` · ${new Date(w.time).toLocaleString()}` : ""}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="muted">尚未参加任何作战（出征进攻、守城、野外遭遇都会写在这里）。</p>
+                    )}
+                  </>
                 ) : null}
                 {focusCard.kind === "slave" && mine ? (
                   <button className="btn" onClick={() => {
@@ -746,61 +792,6 @@ export function App() {
                     {pickedP.includes(focusCard.id) ? "移出出征勾选" : "勾选出征"}
                   </button>
                 ) : null}
-              </>
-            ) : null}
-
-            {modal === "market" ? (
-              <>
-                <h3>{t("marketTitle")}</h3>
-                <p className="muted">{t("marketHint")}</p>
-                <input className="board-search" value={boardQ} onChange={(e) => setBoardQ(e.target.value)} placeholder={t("marketSearch")} />
-                <div className="board-cats">
-                  {([["all", "catAll"], ["mine", "catMine"], ["foot", "catFoot"], ["bow", "catBow"], ["horse", "catHorse"], ["navy", "catNavy"], ["cheap", "catCheap"]] as [BoardCat, "catAll" | "catMine" | "catFoot" | "catBow" | "catHorse" | "catNavy" | "catCheap"][]).map(([id, key]) => (
-                    <button key={id} className={`btn tiny${boardCat === id ? " primary" : ""}`} onClick={() => setBoardCat(id)}>{t(key)}</button>
-                  ))}
-                </div>
-                <div className="board-body">
-                  <div className="board-grid">
-                    {filteredListings.length ? filteredListings.map(({ listing, card }) => (
-                      <div className="card" key={listing.id}>
-                        <div>
-                          {card?.name || listing.cardId}
-                          <small>{card?.role ? ROLES[card.role].name : "人物"} · {winstonToAr(listing.winston)} AR · {shortAddr(listing.seller)}</small>
-                        </div>
-                        {listing.seller === g.address ? (
-                          <button className="btn tiny" onClick={() => {
-                            g.addCommand(makeCommand({ kind: "delist_card", label: `撤架 ${card?.name || ""}`, listingId: listing.id }));
-                          }}>撤架</button>
-                        ) : (
-                          <button className="btn tiny" onClick={async () => {
-                            if (!city || !g.address) {
-                              g.setError("先有一座自己的城才能买卡");
-                              return;
-                            }
-                            try {
-                              g.setError("");
-                              const paid = await g.payForCard(listing.seller, listing.winston, listing.cardId, listing.id, city.id);
-                              g.addCommand(makeCommand({
-                                kind: "buy_card",
-                                label: `买卡 ${card?.name || ""}`,
-                                listingId: listing.id,
-                                cityId: city.id,
-                                cardId: listing.cardId,
-                                payTx: paid.payTx,
-                                burnTx: paid.burnTx,
-                                feeTx: paid.burnTx,
-                                priceWinston: listing.winston,
-                              }));
-                              setModal("none");
-                            } catch (e) {
-                              g.setError(e instanceof Error ? e.message : String(e));
-                            }
-                          }}>用 AR 购买</button>
-                        )}
-                      </div>
-                    )) : <p className="muted">{t("emptyMarket")}</p>}
-                  </div>
-                </div>
               </>
             ) : null}
 

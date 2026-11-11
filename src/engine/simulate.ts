@@ -1,13 +1,23 @@
 import { berthOf, byIds, mintCard, slowest, uniqueId } from "./cards";
 import { AR_FEE_ADDR, BUILDINGS, COLONIZE_COST, MISSION_NAME, ROLES, scaleTime, splitWinston, SUPPLY_PER_SLAVE } from "./catalog";
-import { buildSlotsOf, citizensOf, garrisonPeople, garrisonShips, recruitCapOf, recruitableCount, roleCapOf, roleCountOf, worksOf } from "./citymath";
+import { buildSlotsOf, citizensOf, garrisonPeople, garrisonShips, homeOf, recruitCapOf, recruitableCount, roleCapOf, roleCountOf, worksOf } from "./citymath";
 import { resolveFight } from "./combat";
 import { canColonize, canFound, chartOf, CHART, cityIdAt, isWater, npcAt, npcPower, respawnMs, terrainAt } from "./map";
 import { marchSeconds, planPath, posAt, timeAtIndex } from "./path";
 import { ensureCityPlots, findPlotFor, occupyPlot, plotTimeMult, seedCityPlots } from "./plots";
 import {
+  bumpPeak,
+  canFoundVillage,
+  cityLevelCap,
+  hamletOf,
+  isHamlet,
+  SETTLE_COST,
+  SITE_UPGRADE,
+} from "./hamlets";
+import {
   adjacentClaimed,
   alliesOf,
+  claimOwner,
   claimTile,
   claimsGap,
   createGuild,
@@ -24,7 +34,7 @@ function emptyWorld(): World {
   return {
     cities: {}, cards: {}, squads: {}, marches: {}, listings: {}, reports: [], skipped: [],
     resolvedClash: {}, gone: {}, raidDone: {}, spentPays: {}, claims: {}, guilds: {}, memberOf: {},
-    guildBanUntil: {}, simAt: 0, digest: "",
+    guildBanUntil: {}, fallen: {}, simAt: 0, digest: "",
   };
 }
 
@@ -40,7 +50,9 @@ function hydrateWorld(world: World): World {
   world.gone ||= {};
   world.raidDone ||= {};
   world.spentPays ||= {};
+  world.fallen ||= {};
   ensureGuildState(world);
+  sweepFallen(world);
   for (const r of world.reports) {
     r.rounds ||= [];
     r.deadNames ||= [];
@@ -52,6 +64,11 @@ function hydrateWorld(world: World): World {
     city.plots ||= [];
     city.wars ||= [];
     city.buildMult ||= {};
+    city.hamlet ||= city.parentId ? "village" : "city";
+    bumpPeak(city);
+  }
+  for (const card of Object.values(world.cards)) {
+    card.homeCityId ||= card.cityId;
   }
   return world;
 }
@@ -128,6 +145,8 @@ function makeNpcCity(world: World, x: number, y: number, garrison = false) {
       wars: [],
       plots: [],
       tribeLevel: site.level,
+      peakLevel: site.level,
+      hamlet: "city",
     };
     seedCityPlots(world.cities[id], (Object.keys(world.cities[id].buildings) as BuildingId[]).filter((bid) => (world.cities[id].buildings[bid]?.level || 0) > 0));
   }
@@ -158,6 +177,7 @@ function finishJobs(world: World, city: City, t: number) {
       b.level = b.job.to;
       delete b.job;
       city.buildings[bid as BuildingId] = b;
+      bumpPeak(city);
     }
   }
 }
@@ -232,7 +252,7 @@ function returnHome(world: World, ids: string[], cityId: string | undefined) {
     const card = world.cards[id];
     if (!card) continue;
     card.marchId = undefined;
-    if (cityId) card.cityId = cityId;
+    card.cityId = cityId || card.homeCityId || card.cityId;
   }
 }
 
@@ -246,8 +266,67 @@ function parkAt(world: World, ids: string[], city: City) {
   }
 }
 
+/** 迁籍：开辟城邦、建成乡村的人改编制。出征驻扎不走这里。 */
+function transferHome(world: World, ids: string[], city: City) {
+  parkAt(world, ids, city);
+  for (const id of ids) {
+    const card = world.cards[id];
+    if (card) card.homeCityId = city.id;
+  }
+}
+
+function buryFromReports(world: World) {
+  if (!world.fallen) world.fallen = {};
+  for (const r of world.reports || []) {
+    if (r.deadIds?.length) {
+      for (const id of r.deadIds) {
+        const c = world.cards[id];
+        if (!c) continue;
+        world.fallen[id] = { name: c.name, owner: c.owner, at: r.time };
+        delete world.cards[id];
+      }
+      continue;
+    }
+    if (!r.deadNames?.length) continue;
+    const names = new Set(r.deadNames);
+    const sides = new Set([r.attacker, r.defender].filter(Boolean));
+    for (const c of Object.values(world.cards)) {
+      if (!names.has(c.name) || !sides.has(c.owner)) continue;
+      const inThisWar = (c.campaigns || []).some((w) => w.id === r.id || w.id.startsWith(`${r.id}:`));
+      if (!inThisWar) continue;
+      world.fallen[c.id] = { name: c.name, owner: c.owner, at: r.time };
+      delete world.cards[c.id];
+    }
+  }
+}
+
+function sweepFallen(world: World) {
+  if (!world.fallen) world.fallen = {};
+  buryFromReports(world);
+  for (const id of Object.keys(world.fallen)) {
+    delete world.cards[id];
+  }
+  for (const id of Object.keys(world.listings || {})) {
+    const listing = world.listings[id];
+    if (!listing) continue;
+    if (world.fallen[listing.cardId] || !world.cards[listing.cardId]) delete world.listings[id];
+  }
+  for (const sq of Object.values(world.squads || {})) {
+    sq.personIds = sq.personIds.filter((id) => world.cards[id] && !world.fallen[id]);
+    sq.shipIds = sq.shipIds.filter((id) => world.cards[id] && !world.fallen[id]);
+  }
+}
+
 function eraseCards(world: World, cards: Card[]) {
-  for (const c of cards) delete world.cards[c.id];
+  if (!world.fallen) world.fallen = {};
+  const seen = new Set<string>();
+  for (const c of cards) {
+    if (!c || seen.has(c.id)) continue;
+    seen.add(c.id);
+    world.fallen[c.id] = { name: c.name, owner: c.owner, at: world.simAt || 0 };
+    delete world.cards[c.id];
+  }
+  sweepFallen(world);
 }
 
 function clashKey(a: string, b: string, tile: string): string {
@@ -292,7 +371,13 @@ function corridorBlocked(world: World, tiles: { x: number; y: number }[], owner:
     const p = tiles[i];
     if (p.x === destX && p.y === destY) continue;
     const c = cityAt(world, p.x, p.y);
-    if (c && !friends.has(c.owner)) return `须先清空连通地块 (${p.x},${p.y}) ${c.name}`;
+    if (c && !friends.has(c.owner)) {
+      return isHamlet(c)
+        ? `路上有敌方乡村 ${c.name} (${p.x},${p.y})，须先占领或毁灭才能开路，劫掠不能拆掉它`
+        : `路上有敌方城邦 ${c.name} (${p.x},${p.y})，须先占领或毁灭`;
+    }
+    const who = claimOwner(world, p.x, p.y);
+    if (who && !friends.has(who)) return `路上格子 (${p.x},${p.y}) 仍属他人，须先侦察抢格开路`;
   }
   return null;
 }
@@ -319,6 +404,9 @@ function buildingLevels(city: City): number {
 }
 
 function destroyCity(world: World, city: City, t: number) {
+  for (const kid of Object.values(world.cities).filter((c) => c.parentId === city.id)) {
+    destroyCity(world, kid, t);
+  }
   world.gone[city.id] = {
     at: t,
     respawnAt: city.npc ? t + respawnMs(city.tribeLevel || 1) : Number.MAX_SAFE_INTEGER,
@@ -390,15 +478,15 @@ function applyAftermath(world: World, march: March, dest: City, t: number, soldi
     world.reports[0].supplies = supplies;
     world.reports[0].aftermath = "plunder";
     world.reports[0].rounds.push({ key: "plunder", params: { slaves, supplies, hurt }, title: "劫掠", text: `带走奴隶卡 ${slaves}、物资卡 ${supplies}。因兵民悬殊，只毁去 ${hurt} 级建筑。城未易主。` });
-    claimTile(world, march.owner, dest.x, dest.y);
     returnHome(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), origin?.id);
     return;
   }
   if (march.mission === "occupy") {
     dest.owner = march.owner;
     dest.npc = false;
+    if (isHamlet(dest)) dest.parentId = undefined;
     parkAt(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), dest);
-    claimTile(world, march.owner, dest.x, dest.y);
+    claimTile(world, march.owner, dest.x, dest.y, true);
     world.reports[0].aftermath = "occupy";
     world.reports[0].rounds.push({ key: "occupy", params: { name: dest.name }, title: "占领", text: `${dest.name} 易主。系统城不能毁灭，可占领、劫掠、屠城。` });
     return;
@@ -407,6 +495,7 @@ function applyAftermath(world: World, march: March, dest: City, t: number, soldi
     const hurt = damageBuildings(dest, Math.max(2, Math.floor(buildingLevels(dest) * 0.55)), soldiers, cit, bitsWant + 4);
     dest.owner = march.owner;
     dest.npc = false;
+    if (isHamlet(dest)) dest.parentId = undefined;
     const slaves = mintSlaves(world, Math.max(2, Math.floor(works * 0.2) + hurt), march.owner, dest.id, t, seed);
     const supplies = mintSupply(world, Math.max(2, Math.floor(works * 0.28) + hurt), march.owner, dest.id, t, seed + "g");
     parkAt(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), dest);
@@ -414,7 +503,7 @@ function applyAftermath(world: World, march: March, dest: City, t: number, soldi
     world.reports[0].supplies = supplies;
     world.reports[0].aftermath = "massacre";
     world.reports[0].rounds.push({ key: "massacre", params: { hurt, slaves, supplies }, title: "屠城", text: `城易主。毁建筑 ${hurt} 级，得奴隶卡 ${slaves}、物资卡 ${supplies}。兵少则毁不了太多。` });
-    claimTile(world, march.owner, dest.x, dest.y);
+    claimTile(world, march.owner, dest.x, dest.y, true);
     return;
   }
   if (march.mission === "destroy") {
@@ -422,7 +511,7 @@ function applyAftermath(world: World, march: March, dest: City, t: number, soldi
       dest.owner = march.owner;
       dest.npc = false;
       parkAt(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), dest);
-      claimTile(world, march.owner, dest.x, dest.y);
+      claimTile(world, march.owner, dest.x, dest.y, true);
       world.reports[0].aftermath = "occupy";
       world.reports[0].rounds.push({ key: "noDestroy", params: { name: dest.name }, title: "不能毁灭", text: `${dest.name} 是系统城，已改为占领。` });
       return;
@@ -434,6 +523,7 @@ function applyAftermath(world: World, march: March, dest: City, t: number, soldi
     world.reports[0].aftermath = "destroy";
     world.reports[0].rounds.push({ key: "destroy", params: { name: dest.name, slaves, supplies }, title: "毁灭", text: `${dest.name} 从地图上抹去。奴隶卡 ${slaves}、物资卡 ${supplies} 带回。` });
     returnHome(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), origin?.id);
+    claimTile(world, march.owner, dest.x, dest.y, true);
     destroyCity(world, dest, t);
   }
 }
@@ -445,22 +535,51 @@ function resolveArrival(world: World, march: March, t: number) {
   const still = [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]);
 
   if (march.mission === "scout") {
-    if (!dest && adjacentClaimed(world, march.owner, march.toX, march.toY)) {
-      claimTile(world, march.owner, march.toX, march.toY);
+    if (dest && isHamlet(dest) && dest.owner !== march.owner && !alliesOf(world, march.owner).has(dest.owner)) {
+      const fight = fightMarch(world, march, t, dest, false);
+      const soldiers = still.filter((id) => world.cards[id] && world.cards[id].kind !== "ship").length;
+      if (fight.report.win && world.cities[dest.id]) {
+        applyAftermath(world, { ...march, mission: "plunder" }, dest, t, soldiers);
+        fight.report.aftermath = "plunder";
+        fight.report.rounds.push({
+          key: "scoutRaidVillage",
+          params: { name: dest.name },
+          title: "抢劫乡村",
+          text: `侦察遇乡村 ${dest.name}，已按劫掠处理。要占地须直接进攻占领。`,
+        });
+      } else {
+        returnHome(world, [...march.personIds, ...march.shipIds].filter((id) => world.cards[id]), origin?.id);
+        fight.report.rounds.push({ key: "loseReturn", params: {}, title: "回报", text: "抢劫乡村失利，幸存者已返回。" });
+      }
+      delete world.marches[march.id];
+      return;
     }
-    const scoutKey = dest ? "scoutCity" : adjacentClaimed(world, march.owner, march.toX, march.toY) ? "scoutOpen" : "scoutBlocked";
+    const taken = claimOwner(world, march.toX, march.toY);
+    let grabbed = false;
+    if (!dest && terrainAt(march.toX, march.toY) !== "sea") {
+      grabbed = claimTile(world, march.owner, march.toX, march.toY, true);
+    }
+    const scoutKey = dest
+      ? "scoutCity"
+      : terrainAt(march.toX, march.toY) === "sea"
+        ? "scoutSea"
+        : grabbed && taken && taken !== march.owner
+          ? "scoutGrab"
+          : grabbed
+            ? "scoutOpen"
+            : "scoutBlocked";
     const report: BattleReport = {
       id: `scout:${march.id}`,
       time: t,
       title: "侦察回报",
       code: "scout",
       attacker: march.owner,
-      defender: dest?.owner || "__wild__",
+      defender: dest?.owner || taken || "__wild__",
       x: march.toX,
       y: march.toY,
       naval: march.naval,
       field: false,
-      win: true,
+      win: Boolean(grabbed || dest),
       rounds: [
         {
           key: scoutKey,
@@ -469,10 +588,14 @@ function resolveArrival(world: World, march: March, t: number) {
             : {},
           title: "斥候",
           text: dest
-            ? `城墙履历 ${dest.wars.length} 场。公民约 ${citizensOf(dest, world)}，名册 ${garrisonPeople(world, dest.id).length}，舰只 ${garrisonShips(world, dest.id).length}，宽度 ${dest.frontage}。`
-            : adjacentClaimed(world, march.owner, march.toX, march.toY)
-              ? "目标地无城。连通已打通，可开辟殖民市。"
-              : "目标地无城。第二座城必须先把连通格子打下来。",
+            ? `此处已有城邦，侦察不能夺格。城墙履历 ${dest.wars.length} 场。驻军 ${garrisonPeople(world, dest.id).length}，舰只 ${garrisonShips(world, dest.id).length}。要占地必须进攻。`
+            : scoutKey === "scoutGrab"
+              ? "空地已从他人手中夺下，此格现属你。"
+              : scoutKey === "scoutOpen"
+                ? "空地已连通，此格现属你。"
+                : scoutKey === "scoutSea"
+                  ? "海域不能抢格。"
+                  : "未能夺下此格。",
         },
       ],
       deadNames: [],
@@ -535,10 +658,17 @@ function resolveArrival(world: World, march: March, t: number) {
       delete world.marches[march.id];
       return;
     }
+    if (claimOwner(world, march.toX, march.toY) && claimOwner(world, march.toX, march.toY) !== march.owner) {
+      returnHome(world, still, origin?.id);
+      world.skipped.push(`${march.id}:此地已被他人连通`);
+      delete world.marches[march.id];
+      return;
+    }
     const city: City = {
       id: cityIdAt(march.toX, march.toY),
       owner: march.owner,
       name: `殖民市 ${march.toX},${march.toY}`,
+      hamlet: "city",
       x: march.toX,
       y: march.toY,
       buildings: {
@@ -552,11 +682,13 @@ function resolveArrival(world: World, march: March, t: number) {
       frontage: frontageAt(march.toX, march.toY),
       buildMult: buildMultAt(march.toX, march.toY),
       wars: [],
+      peakLevel: 1,
     };
     world.cities[city.id] = city;
     seedCityPlots(city, isWater(terrainAt(march.toX, march.toY)) ? ["acropolis", "oikos", "harbor"] : ["acropolis", "oikos"]);
+    bumpPeak(city);
     claimTile(world, march.owner, city.x, city.y);
-    parkAt(world, still, city);
+    transferHome(world, still, city);
     world.reports.unshift({
       id: `col:${march.id}`,
       time: t,
@@ -572,6 +704,72 @@ function resolveArrival(world: World, march: March, t: number) {
       rounds: [{ key: "colonizeText", params: { name: city.name, slaves: COLONIZE_COST.slaves, supplies: COLONIZE_COST.supplies }, title: "开辟", text: `${city.name} 建立。消耗奴隶 ${COLONIZE_COST.slaves}、物资 ${COLONIZE_COST.supplies}，人物卡迁入新城。` }],
       deadNames: [],
       aftermath: "colonize",
+    });
+    delete world.marches[march.id];
+    return;
+  }
+
+  if (march.mission === "settle" && !dest) {
+    const parent = origin;
+    const err = parent ? canFoundVillage(world, march.owner, parent, march.toX, march.toY) : "没有出发城";
+    if (err) {
+      returnHome(world, still, origin?.id);
+      world.skipped.push(`${march.id}:${err}`);
+      world.reports.unshift({
+        id: `setfail:${march.id}`,
+        time: t,
+        title: "建村失败",
+        code: "settleFail",
+        attacker: march.owner,
+        defender: "__wild__",
+        x: march.toX,
+        y: march.toY,
+        naval: march.naval,
+        field: false,
+        win: false,
+        rounds: [{ key: "settleFailText", params: { reason: err }, title: "回报", text: err }],
+        deadNames: [],
+        aftermath: "settle",
+      });
+      delete world.marches[march.id];
+      return;
+    }
+    const village: City = {
+      id: cityIdAt(march.toX, march.toY),
+      owner: march.owner,
+      name: `乡村 ${march.toX},${march.toY}`,
+      x: march.toX,
+      y: march.toY,
+      buildings: { acropolis: { level: 1, wars: [] }, oikos: { level: 1, wars: [] } },
+      plots: [],
+      foundedAt: t,
+      npc: false,
+      frontage: frontageAt(march.toX, march.toY),
+      buildMult: buildMultAt(march.toX, march.toY),
+      wars: [],
+      hamlet: "village",
+      parentId: parent!.id,
+      peakLevel: 1,
+    };
+    world.cities[village.id] = village;
+    seedCityPlots(village, ["acropolis", "oikos"]);
+    claimTile(world, march.owner, village.x, village.y, false);
+    transferHome(world, still, village);
+    world.reports.unshift({
+      id: `set:${march.id}`,
+      time: t,
+      title: "乡村建成",
+      code: "settleOk",
+      attacker: march.owner,
+      defender: "__wild__",
+      x: march.toX,
+      y: march.toY,
+      naval: march.naval,
+      field: false,
+      win: true,
+      rounds: [{ key: "settleText", params: { name: village.name, parent: parent!.name }, title: "开辟", text: `${village.name} 归属 ${parent!.name}，解锁城邦等级上限 +${2}。` }],
+      deadNames: [],
+      aftermath: "settle",
     });
     delete world.marches[march.id];
     return;
@@ -795,6 +993,7 @@ function seedTribesAroundPlayers(world: World) {
 }
 
 function tickWorld(world: World, t: number) {
+  sweepFallen(world);
   const from = world.simAt || 0;
   respawnTribes(world, t);
   for (const city of Object.values(world.cities)) tickCity(world, city, t);
@@ -840,6 +1039,8 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     if (existing && !existing.npc) {
       return skip(world, cmd, existing.owner === owner ? "这里已是你的城" : "此地已有城邦");
     }
+    const claimed = claimOwner(world, x, y);
+    if (claimed && claimed !== owner) return skip(world, cmd, "此地已被他人连通");
     if (existing?.npc) {
       for (const card of Object.values(world.cards)) {
         if (card.cityId === existing.id) delete world.cards[card.id];
@@ -868,6 +1069,8 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
       frontage: frontageAt(x, y),
       buildMult: buildMultAt(x, y),
       wars: [],
+      hamlet: "city",
+      peakLevel: 1,
     };
     world.cities[city.id] = city;
     seedCityPlots(city, water
@@ -918,6 +1121,12 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     if (bid !== "acropolis" && cur.level >= acro) return skip(world, cmd, "需先升级卫城");
     if (cur.level >= def.max) return skip(world, cmd, "已达最高等级");
     const next = cur.level + 1;
+    const cap = cityLevelCap(world, city);
+    if (next > cap) {
+      return skip(world, cmd, isHamlet(city)
+        ? "附属聚落请用「升级为郊区/城区」"
+        : `本城等级上限 ${cap}。在大地图围绕城市一圈圈修建乡村可解锁更高上限`);
+    }
     const cost = slaveCostFor(next);
     const need = workersFor(next);
     const pool = idleWorkers(world, city.id, owner);
@@ -936,6 +1145,22 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     return;
   }
 
+  if (cmd.kind === "upgrade_site") {
+    if (!city || city.owner !== owner) return skip(world, cmd, "城邦不属于你");
+    const kind = hamletOf(city);
+    if (kind !== "village" && kind !== "suburb") return skip(world, cmd, "只有乡村或郊区可以升格");
+    const step = SITE_UPGRADE[kind];
+    const goods = idleSupply(world, city.id).length;
+    const bonds = idleSlaves(world, city.id).length;
+    if (goods < step.supplies) return skip(world, cmd, `升格需要物资 ${step.supplies}`);
+    if (bonds < step.slaves) return skip(world, cmd, `升格需要奴隶 ${step.slaves}`);
+    consumeKind(world, city.id, "supply", step.supplies);
+    if (step.slaves) consumeKind(world, city.id, "slave", step.slaves);
+    city.hamlet = step.to;
+    bumpPeak(city);
+    return;
+  }
+
   if (cmd.kind === "recruit") {
     if (!city || city.owner !== owner) return skip(world, cmd, "城邦不属于你");
     const role = cmd.role!;
@@ -944,22 +1169,32 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     if (role === "citizen") return skip(world, cmd, "公民只能由本城奴隶转正");
     if (def.building && (city.buildings[def.building]?.level || 0) < 1) return skip(world, cmd, `需要 ${BUILDINGS[def.building].name}`);
     if (def.needCoast && !isWater(terrainAt(city.x, city.y))) return skip(world, cmd, "舰只与舰长要在海岸或海域城招募");
-    if (def.kind !== "ship" && recruitableCount(world, city.id) >= recruitCapOf(city)) {
-      return skip(world, cmd, "招募上限已满，上限只由建筑物决定");
+    const want = Math.max(1, Math.min(40, Math.floor(cmd.count || 1)));
+    let made = 0;
+    for (let i = 0; i < want; i += 1) {
+      if (def.kind !== "ship" && recruitableCount(world, city.id) >= recruitCapOf(city)) {
+        if (!made) return skip(world, cmd, "招募上限已满，上限只由建筑物决定");
+        break;
+      }
+      const roleCap = roleCapOf(city, role);
+      if (def.capPerLevel && roleCountOf(world, city.id, role) >= roleCap) {
+        if (!made) return skip(world, cmd, `${def.name} 已满：${BUILDINGS[def.building!].name} ${city.buildings[def.building!]?.level || 0} 级上限 ${roleCap}`);
+        break;
+      }
+      const id = uniqueId([batchKey, cmd.id, role, owner, String(i)]);
+      if (world.fallen?.[id]) continue;
+      const card = mintCard({
+        id,
+        role,
+        owner,
+        cityId: city.id,
+        bornAt: t,
+        bornTx: entropy,
+      });
+      world.cards[card.id] = card;
+      made += 1;
     }
-    const roleCap = roleCapOf(city, role);
-    if (def.capPerLevel && roleCountOf(world, city.id, role) >= roleCap) {
-      return skip(world, cmd, `${def.name} 已满：${BUILDINGS[def.building!].name} ${city.buildings[def.building!]?.level || 0} 级上限 ${roleCap}`);
-    }
-    const card = mintCard({
-      id: uniqueId([batchKey, cmd.id, role, owner]),
-      role,
-      owner,
-      cityId: city.id,
-      bornAt: t,
-      bornTx: entropy,
-    });
-    world.cards[card.id] = card;
+    if (!made) return skip(world, cmd, "没有招到人");
     return;
   }
 
@@ -1023,10 +1258,20 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
       const blocked = corridorBlocked(world, path.tiles, owner, cmd.toX!, cmd.toY!);
       if (blocked) return skip(world, cmd, blocked);
     }
-    if (cmd.mission === "colonize") {
-      if (!canColonize(terrainAt(cmd.toX!, cmd.toY!))) return skip(world, cmd, "海域不能殖民，请选海岸或陆地");
+    if (cmd.mission === "colonize" || cmd.mission === "settle") {
+      if (!canColonize(terrainAt(cmd.toX!, cmd.toY!))) return skip(world, cmd, "海域不能建城或建村，请选海岸或陆地");
+      const who = claimOwner(world, cmd.toX!, cmd.toY!);
+      if (who && who !== owner) return skip(world, cmd, "此地已被他人连通，请先侦察抢格");
       const gap = claimsGap(world, owner, path.tiles, cmd.toX!, cmd.toY!);
       if (gap) return skip(world, cmd, gap);
+    }
+    if (cmd.mission === "colonize") {
+      if (isHamlet(city)) return skip(world, cmd, "附属乡村不能开辟独立城邦，请从城邦出发");
+      if (cityAt(world, cmd.toX!, cmd.toY!)) return skip(world, cmd, "已有聚落，开辟城邦请另选空地");
+    }
+    if (cmd.mission === "settle") {
+      const err = canFoundVillage(world, owner, city, cmd.toX!, cmd.toY!);
+      if (err) return skip(world, cmd, err);
     }
     const destCity = cityAt(world, cmd.toX!, cmd.toY!);
     const war = cmd.mission === "plunder" || cmd.mission === "massacre" || cmd.mission === "destroy" || cmd.mission === "occupy";
@@ -1057,6 +1302,18 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
       }
       if (!consumeKind(world, city.id, "supply", COLONIZE_COST.supplies)) {
         return skip(world, cmd, `殖民消耗 ${COLONIZE_COST.supplies} 张物资卡`);
+      }
+    }
+    if (cmd.mission === "settle") {
+      const persons = people.filter((p) => p.kind === "person");
+      if (persons.length < SETTLE_COST.persons) {
+        return skip(world, cmd, `修建乡村需要 ${SETTLE_COST.persons} 张人物卡随行`);
+      }
+      if (!consumeKind(world, city.id, "slave", SETTLE_COST.slaves)) {
+        return skip(world, cmd, `建村消耗 ${SETTLE_COST.slaves} 张奴隶卡`);
+      }
+      if (!consumeKind(world, city.id, "supply", SETTLE_COST.supplies)) {
+        return skip(world, cmd, `建村消耗 ${SETTLE_COST.supplies} 张物资卡`);
       }
     }
     const id = cmd.id;
@@ -1110,6 +1367,7 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
 
   if (cmd.kind === "list_card") {
     const card = world.cards[cmd.cardId || ""];
+    if (card && world.fallen?.[card.id]) return skip(world, cmd, "此卡已阵亡");
     if (!card || card.owner !== owner || card.kind !== "person") return skip(world, cmd, "只能上架自己的人物卡");
     if (card.marchId || card.jobId) return skip(world, cmd, "占用中的卡不能上架");
     if (card.listedWinston) return skip(world, cmd, "已在货架上");
@@ -1182,6 +1440,7 @@ function settleSale(
   world.spentPays[fee.id] = true;
   card.owner = buyer;
   card.cityId = city.id;
+  card.homeCityId = city.id;
   card.listedWinston = undefined;
   card.marchId = undefined;
   card.jobId = undefined;
@@ -1269,6 +1528,7 @@ export function projectWorld(folded: World, now: number, viewX = 0, viewY = 0): 
   ensureSystemNear(world, viewX, viewY);
   seedTribesAroundPlayers(world);
   tickWorld(world, syncTime(now, folded.simAt || 0));
+  sweepFallen(world);
   return world;
 }
 
@@ -1293,6 +1553,6 @@ export function playerCities(world: World, owner: string): City[] {
   return owned;
 }
 
-export { buildSlotsOf, citizensOf, recruitCapOf, roleCapOf, roleCountOf, worksOf, garrisonPeople, garrisonShips, MISSION_NAME };
+export { buildSlotsOf, citizensOf, homeOf, recruitCapOf, roleCapOf, roleCountOf, worksOf, garrisonPeople, garrisonShips, MISSION_NAME };
 export { idleSupply, idleSlaves, idleWorkers, corridorBlocked };
 export { claimsGap, isClaimed, adjacentClaimed, alliesOf } from "./realm";

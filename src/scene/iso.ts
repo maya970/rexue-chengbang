@@ -22,6 +22,28 @@ export function rotateCell(lx: number, ly: number, yaw: number, w: number, h: nu
   }
 }
 
+export function unrotateCell(rx: number, ry: number, yaw: number, w: number, h: number) {
+  const mx = w - 1;
+  const my = h - 1;
+  switch (yaw & 3) {
+    case 1: return { x: ry, y: my - rx };
+    case 2: return { x: mx - rx, y: my - ry };
+    case 3: return { x: mx - ry, y: rx };
+    default: return { x: rx, y: ry };
+  }
+}
+
+/** Visible cliff neighbors after yaw: iso left = +ry, iso right = +rx. */
+export function visNeighbor(lx: number, ly: number, yaw: number, w: number, h: number, side: "left" | "right") {
+  const r = rotateCell(lx, ly, yaw, w, h);
+  return unrotateCell(side === "right" ? r.x + 1 : r.x, side === "right" ? r.y : r.y + 1, yaw, w, h);
+}
+
+export function depthOf(lx: number, ly: number, yaw: number, w: number, h: number) {
+  const r = rotateCell(lx, ly, yaw, w, h);
+  return r.x + r.y;
+}
+
 export function project(
   lx: number,
   ly: number,
@@ -50,9 +72,25 @@ export function drawBlock(
   left: string,
   right: string,
 ) {
+  drawBlockFaces(ctx, x, y, scale, drop, drop, top, left, right);
+}
+
+/** Two visible cliff faces, each from the neighboring height up so elevated tiles are solid underneath. */
+export function drawBlockFaces(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  scale: number,
+  leftDrop: number,
+  rightDrop: number,
+  top: string,
+  left: string,
+  right: string,
+) {
   const tw = TW * scale;
   const th = TH * scale;
-  const tz = Math.max(scale, drop * TZ * scale);
+  const lz = Math.max(scale * 0.45, leftDrop * TZ * scale);
+  const rz = Math.max(scale * 0.45, rightDrop * TZ * scale);
   const hw = tw / 2;
   const hh = th / 2;
   const t = { x, y };
@@ -62,16 +100,16 @@ export function drawBlock(
   ctx.beginPath();
   ctx.moveTo(r.x, r.y);
   ctx.lineTo(b.x, b.y);
-  ctx.lineTo(b.x, b.y + tz);
-  ctx.lineTo(r.x, r.y + tz);
+  ctx.lineTo(b.x, b.y + rz);
+  ctx.lineTo(r.x, r.y + rz);
   ctx.closePath();
   ctx.fillStyle = right;
   ctx.fill();
   ctx.beginPath();
   ctx.moveTo(l.x, l.y);
   ctx.lineTo(b.x, b.y);
-  ctx.lineTo(b.x, b.y + tz);
-  ctx.lineTo(l.x, l.y + tz);
+  ctx.lineTo(b.x, b.y + lz);
+  ctx.lineTo(l.x, l.y + lz);
   ctx.closePath();
   ctx.fillStyle = left;
   ctx.fill();
@@ -86,6 +124,30 @@ export function drawBlock(
   ctx.strokeStyle = "rgba(20,12,8,0.35)";
   ctx.lineWidth = Math.max(1, scale * 0.5);
   ctx.stroke();
+}
+
+export function drawIsoHouse(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  scale: number,
+  pal: { top: string; left: string; right: string },
+  stories = 1,
+) {
+  drawBlockFaces(ctx, x, y, scale, stories, stories, pal.top, pal.left, pal.right);
+}
+
+export function drawLvTag(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, lv: number, peak?: number) {
+  const text = peak && peak > lv ? `LV.${lv} (曾${peak})` : `LV.${lv}`;
+  ctx.save();
+  ctx.font = `bold ${Math.max(10, Math.round(9 * scale))}px "Noto Serif SC", serif`;
+  ctx.textAlign = "center";
+  ctx.lineWidth = Math.max(2, scale);
+  ctx.strokeStyle = "rgba(12,8,4,0.85)";
+  ctx.fillStyle = "#f8f0a8";
+  ctx.strokeText(text, x, y - 2 * scale);
+  ctx.fillText(text, x, y - 2 * scale);
+  ctx.restore();
 }
 
 export function textureIsoTop(

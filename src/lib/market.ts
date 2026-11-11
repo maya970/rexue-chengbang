@@ -5,6 +5,14 @@ import type { TxProof } from "../types";
 
 const arweave = Arweave.init({ host: "arweave.net", port: 443, protocol: "https" });
 
+export function marketBucket(role?: string) {
+  if (role === "toxotes") return "bow";
+  if (role === "hippeus") return "horse";
+  if (role === "epibatai" || role === "trierarch") return "navy";
+  if (role === "hoplite" || role === "peltast" || role === "citizen") return "foot";
+  return "other";
+}
+
 export function arToWinston(ar: number): number {
   return Math.max(1, Math.floor(ar * 1e12));
 }

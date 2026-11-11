@@ -17,15 +17,22 @@ export function alliesOf(world: World, owner: string): Set<string> {
   return set;
 }
 
-export function isClaimed(world: World, owner: string, x: number, y: number) {
-  const who = world.claims?.[tileKey(x, y)];
-  if (!who) return false;
-  return alliesOf(world, owner).has(who);
+export function claimOwner(world: World, x: number, y: number) {
+  return world.claims?.[tileKey(x, y)];
 }
 
-export function claimTile(world: World, owner: string, x: number, y: number) {
+export function isClaimed(world: World, owner: string, x: number, y: number) {
+  return world.claims?.[tileKey(x, y)] === owner;
+}
+
+/** steal：占领/屠城等才改写他人连通。同一时期一格只属一人。 */
+export function claimTile(world: World, owner: string, x: number, y: number, steal = false) {
   if (!world.claims) world.claims = {};
-  world.claims[tileKey(x, y)] = owner;
+  const k = tileKey(x, y);
+  const who = world.claims[k];
+  if (who && who !== owner && !steal) return false;
+  world.claims[k] = owner;
+  return true;
 }
 
 export function adjacentClaimed(world: World, owner: string, x: number, y: number) {
@@ -118,6 +125,8 @@ export function ensureSystemNear(world: World, x: number, y: number) {
           buildMult: buildMultAt(pos.x, pos.y),
           wars: [],
           tribeLevel: lv,
+          peakLevel: lv,
+          hamlet: "city",
           systemRank: row.rank,
         };
         seedCityPlots(

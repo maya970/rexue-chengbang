@@ -5,6 +5,10 @@ export function buildingCount(city: City): number {
   return Object.values(city.buildings).reduce((n, b) => n + (b?.level || 0), 0);
 }
 
+export function homeOf(card: Card) {
+  return card.homeCityId || card.cityId;
+}
+
 export function citizensOf(city: City, world: World): number {
   let n = 0;
   for (const [id, b] of Object.entries(city.buildings)) {
@@ -54,11 +58,11 @@ export function garrisonShips(world: World, cityId: string): Card[] {
 }
 
 export function recruitableCount(world: World, cityId: string): number {
-  return Object.values(world.cards).filter((c) => c.cityId === cityId && c.kind === "person").length;
+  return Object.values(world.cards).filter((c) => homeOf(c) === cityId && c.kind === "person").length;
 }
 
 export function roleCountOf(world: World, cityId: string, role: RoleId): number {
-  return Object.values(world.cards).filter((c) => c.cityId === cityId && c.role === role).length;
+  return Object.values(world.cards).filter((c) => homeOf(c) === cityId && c.role === role).length;
 }
 
 /** 建筑物等级决定该职人物卡上限。没有对应建筑则为 0。 */

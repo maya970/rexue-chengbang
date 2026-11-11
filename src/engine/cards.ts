@@ -28,6 +28,7 @@ export function mintCard(input: {
     name,
     owner: input.owner,
     cityId: input.cityId,
+    homeCityId: input.cityId,
     bornAt: input.bornAt,
     bornTx: input.bornTx,
     campaigns: [],
