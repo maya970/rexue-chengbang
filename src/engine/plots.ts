@@ -1,6 +1,7 @@
 import { BUILDING_PLOTS, BUILDINGS, CITY_H, CITY_W, PLOT_ELEV, PLOT_TIME } from "./catalog";
 import { hashXY, terrainAt } from "./map";
 import { slopeConnect } from "./height";
+import { copiesOf, rebuildBuildings, workLevel } from "./works";
 import type { BuildingId, City, CityPlot, PlotKind, Terrain } from "../types";
 
 const MIX: Record<Terrain, Record<PlotKind, number>> = {
@@ -132,22 +133,78 @@ export function canBuildOn(bid: BuildingId, kind: PlotKind) {
   return BUILDING_PLOTS[bid].includes(kind);
 }
 
-export function findPlotFor(city: City, bid: BuildingId, plotId?: string): CityPlot | undefined {
-  const existing = city.plots.find((p) => p.building === bid);
-  if (existing) return existing;
-  if (plotId) return city.plots.find((p) => p.id === plotId && !p.building && canBuildOn(bid, p.kind));
+export function findEmptyPlot(city: City, bid: BuildingId, plotId?: string): CityPlot | undefined {
+  if (plotId) {
+    const p = city.plots.find((x) => x.id === plotId);
+    if (p && !p.building && canBuildOn(bid, p.kind)) return p;
+    return undefined;
+  }
   return city.plots.find((p) => !p.building && canBuildOn(bid, p.kind));
 }
 
+export function findPlotFor(city: City, bid: BuildingId, plotId?: string): CityPlot | undefined {
+  if (plotId) {
+    const p = city.plots.find((x) => x.id === plotId);
+    if (!p) return undefined;
+    if (p.building === bid) return p;
+    if (!p.building && canBuildOn(bid, p.kind)) return p;
+    return undefined;
+  }
+  const empty = findEmptyPlot(city, bid);
+  if (empty) return empty;
+  const copies = copiesOf(city, bid);
+  return copies.length === 1 ? copies[0] : undefined;
+}
+
 export function occupyPlot(city: City, bid: BuildingId, plotId?: string): CityPlot | null {
-  const plot = findPlotFor(city, bid, plotId);
+  const plot = findEmptyPlot(city, bid, plotId);
   if (!plot) return null;
   plot.building = bid;
+  if (plot.level === undefined) plot.level = 0;
   return plot;
 }
 
 export function plotOfBuilding(city: City, bid: BuildingId) {
   return city.plots.find((p) => p.building === bid);
+}
+
+function spreadCopies(city: City) {
+  for (const bid of Object.keys(BUILDINGS) as BuildingId[]) {
+    const max = BUILDINGS[bid].max;
+    for (const p of copiesOf(city, bid)) {
+      if (p.building && p.level === undefined) p.level = 1;
+      let extra = workLevel(p) - max;
+      if (extra <= 0) continue;
+      p.level = max;
+      while (extra > 0) {
+        const slot = findEmptyPlot(city, bid);
+        if (!slot) break;
+        slot.building = bid;
+        const chunk = Math.min(max, extra);
+        slot.level = chunk;
+        extra -= chunk;
+      }
+    }
+    const want = city.buildings[bid]?.level || 0;
+    let extra = want - copiesOf(city, bid).reduce((n, p) => n + workLevel(p), 0);
+    for (const p of copiesOf(city, bid)) {
+      if (extra <= 0) break;
+      const room = max - workLevel(p);
+      if (room <= 0) continue;
+      const add = Math.min(room, extra);
+      p.level = workLevel(p) + add;
+      extra -= add;
+    }
+    while (extra > 0) {
+      const slot = findEmptyPlot(city, bid);
+      if (!slot) break;
+      slot.building = bid;
+      const chunk = Math.min(max, extra);
+      slot.level = chunk;
+      extra -= chunk;
+    }
+  }
+  rebuildBuildings(city);
 }
 
 export function plotTimeMult(city: City, bid: BuildingId, plot?: CityPlot) {
@@ -169,11 +226,23 @@ export function ensureCityPlots(city: City) {
     const b = city.buildings[bid];
     if (!b || (b.level < 1 && !b.job)) continue;
     if (city.plots.some((p) => p.building === bid)) continue;
-    occupyPlot(city, bid);
+    const p = occupyPlot(city, bid);
+    if (p) {
+      p.level = 0;
+      p.job = b.job;
+    }
   }
+  for (const p of city.plots) {
+    if (p.building && p.level === undefined) p.level = 1;
+  }
+  spreadCopies(city);
 }
 
 export function seedCityPlots(city: City, starter: BuildingId[]) {
   city.plots = generateCityPlots(city.x, city.y);
-  for (const bid of starter) occupyPlot(city, bid);
+  for (const bid of starter) {
+    const p = occupyPlot(city, bid);
+    if (p) p.level = Math.min(BUILDINGS[bid].max, Math.max(1, city.buildings[bid]?.level || 1));
+  }
+  spreadCopies(city);
 }

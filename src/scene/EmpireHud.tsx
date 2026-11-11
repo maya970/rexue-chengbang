@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { BUILDINGS } from "../engine/catalog";
 import { hamletOf, isHamlet } from "../engine/hamlets";
 import { homeOf } from "../engine/citymath";
+import { plotJobs } from "../engine/works";
 import type { BuildingId, City, Command, World } from "../types";
 
 function remain(ms: number, now: number) {
@@ -106,16 +107,14 @@ export function EmpireHud(props: {
   const shipsHere = hereId ? cards.filter((c) => c.kind === "ship" && c.cityId === hereId && !c.marchId).length : 0;
 
   const jobs = sites.flatMap((c) =>
-    (Object.entries(c.buildings) as [BuildingId, NonNullable<City["buildings"][BuildingId]>][])
-      .filter(([, b]) => b?.job)
-      .map(([bid, b]) => ({
-        key: `${c.id}:${bid}`,
-        name: BUILDINGS[bid].name,
-        city: c.name,
-        to: b.job!.to,
-        finishAt: b.job!.finishAt,
-        here: c.id === hereId,
-      })),
+    plotJobs(c).map((p) => ({
+      key: `${c.id}:${p.id}`,
+      name: p.building ? BUILDINGS[p.building].name : "建筑",
+      city: c.name,
+      to: p.job!.to,
+      finishAt: p.job!.finishAt,
+      here: c.id === hereId,
+    })),
   ).sort((a, b) => a.finishAt - b.finishAt);
   const queued = pending.filter((c) => c.kind === "upgrade").map((c) => ({
     key: c.id,

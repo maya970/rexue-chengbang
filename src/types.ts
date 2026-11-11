@@ -19,8 +19,12 @@ export interface CityPlot {
   lx: number;
   ly: number;
   kind: PlotKind;
-  /** 这块空地已占用的建筑。空地未建则为空。 */
+  /** 这块空地已占用的建筑。空地未建则为空。同种建筑可占多块空地。 */
   building?: BuildingId;
+  /** 这座建筑自己的等级。空地为 0。 */
+  level?: number;
+  job?: { to: number; finishAt: number; workerIds: string[]; material: number };
+  wars?: Campaign[];
   timeMult: number;
   /** 连通缓坡高度，相邻格最多差 1。 */
   elev: number;

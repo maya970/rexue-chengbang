@@ -80,16 +80,16 @@ export const BUILDINGS: Record<
     needCoast?: boolean;
   }
 > = {
-  acropolis: { name: "卫城", blurb: "专属：其他建筑等级不能超过卫城。并提供总招募名额。", max: 16, baseTime: 48, citizens: 4, recruit: 2, works: 3 },
-  agora: { name: "市政广场", blurb: "专属：每级缩短建造时间 2%；每 4 级多允许一座建筑同时在建。", max: 16, baseTime: 36, citizens: 2, recruit: 0, works: 2 },
-  oikos: { name: "民居", blurb: "专属：公民卡上限，并提供最多公民名额。", max: 20, baseTime: 16, citizens: 8, recruit: 0, works: 1 },
-  barracks: { name: "兵营", blurb: "专属：重装步兵、轻盾兵、海军陆战的人数上限。", max: 16, baseTime: 28, citizens: 1, recruit: 3, works: 2 },
-  stables: { name: "马厩", blurb: "专属：骑兵人数上限。", max: 16, baseTime: 32, citizens: 1, recruit: 2, works: 2 },
-  range: { name: "弓营", blurb: "专属：弓手人数上限。弓手站第二排放箭，但更脆弱。", max: 16, baseTime: 28, citizens: 1, recruit: 2, works: 2 },
-  wall: { name: "城墙", blurb: "专属：守城时只增加守方宽度，攻方仍按地形宽度出手。", max: 16, baseTime: 30, citizens: 0, recruit: 0, works: 2 },
-  temple: { name: "神庙", blurb: "专属：守军更难崩溃；本城战役成果按神庙等级加倍铭记。", max: 12, baseTime: 34, citizens: 1, recruit: 0, works: 2 },
-  shipyard: { name: "造船厂", blurb: "专属：招募舰长、三列桨座、运输船。海岸或海域城才能建。", max: 16, baseTime: 40, citizens: 1, recruit: 2, works: 2, needCoast: true },
-  harbor: { name: "海港", blurb: "专属：没有港口不能出海；等级加快海路行军。海岸或海域城才能建。", max: 12, baseTime: 32, citizens: 2, recruit: 0, works: 2, needCoast: true },
+  acropolis: { name: "卫城", blurb: "可建多座。其他建筑单座等级不能超过最高卫城。各级效果合计。升级工期暴增，多修比硬升划算。", max: 16, baseTime: 48, citizens: 4, recruit: 2, works: 3 },
+  agora: { name: "市政广场", blurb: "可建多座。合计每级缩短建造 2%；每 4 级多允许一座同时在建。升级极慢。", max: 16, baseTime: 36, citizens: 2, recruit: 0, works: 2 },
+  oikos: { name: "民居", blurb: "可建多座。合计提供公民卡上限。升级工期暴增。", max: 20, baseTime: 16, citizens: 8, recruit: 0, works: 1 },
+  barracks: { name: "兵营", blurb: "可建多座。合计提高重装、轻盾、海军陆战上限。多修比升级划算。", max: 16, baseTime: 28, citizens: 1, recruit: 3, works: 2 },
+  stables: { name: "马厩", blurb: "可建多座。合计提高骑兵上限。", max: 16, baseTime: 32, citizens: 1, recruit: 2, works: 2 },
+  range: { name: "弓营", blurb: "可建多座。合计提高弓手上限。弓手站第二排放箭，但更脆弱。", max: 16, baseTime: 28, citizens: 1, recruit: 2, works: 2 },
+  wall: { name: "城墙", blurb: "可建多座，单座最高 3 级。每级只加守方宽度。山地石场多，适合多修墙。升级极慢。", max: 3, baseTime: 36, citizens: 0, recruit: 0, works: 2 },
+  temple: { name: "神庙", blurb: "可建多座。合计使守军更难崩溃，战役铭记按合计等级加倍。", max: 12, baseTime: 34, citizens: 1, recruit: 0, works: 2 },
+  shipyard: { name: "造船厂", blurb: "可建多座。合计招募舰长、三列桨座、运输船。海岸或海域城才能建。", max: 16, baseTime: 40, citizens: 1, recruit: 2, works: 2, needCoast: true },
+  harbor: { name: "海港", blurb: "可建多座。至少一座才能出海；合计等级加快海路。海岸或海域城才能建。", max: 12, baseTime: 32, citizens: 2, recruit: 0, works: 2, needCoast: true },
 };
 
 export const ROLES: Record<
@@ -134,5 +134,5 @@ export const MISSION_NAME: Record<import("../types").MarchMission, string> = {
 };
 
 export function scaleTime(base: number, level: number, speed = 1): number {
-  return Math.max(10, Math.floor(base * Math.pow(1.32, Math.max(0, level - 1)) * speed));
+  return Math.max(10, Math.floor(base * Math.pow(5, Math.max(0, level - 1)) * speed));
 }

@@ -1,5 +1,6 @@
 import { canColonize, cityIdAt, terrainAt } from "./map";
 import { claimOwner } from "./realm";
+import { highestLevel } from "./works";
 import type { City, HamletKind, World } from "../types";
 
 export const BASE_CITY_CAP = 4;
@@ -32,7 +33,7 @@ export function displayLevel(city: City) {
   if (hamletOf(city) === "village") return 1;
   if (hamletOf(city) === "suburb") return 2;
   if (hamletOf(city) === "urban") return 3;
-  return city.buildings?.acropolis?.level || 1;
+  return highestLevel(city, "acropolis") || city.buildings?.acropolis?.level || 1;
 }
 
 export function bumpPeak(city: City) {

@@ -4,6 +4,7 @@ import { canFoundVillage, childrenOf, cityLevelCap, hamletLabel, hamletOf, inCit
 import { canColonize, chartName, chartOf, cityIdAt, npcAt, terrainAt, tileName } from "./engine/map";
 import { planPath } from "./engine/path";
 import { canBuildOn, plotTimeMult } from "./engine/plots";
+import { copiesOf, highestLevel, plotJobs, workLevel } from "./engine/works";
 import { empireTimeFactor, slaveCostFor, workersFor } from "./engine/site";
 import { claimOwner, claimsGap, isAllyClaim, isClaimed } from "./engine/realm";
 import { alliesOf, buildSlotsOf, citizensOf, corridorBlocked, homeOf, idleSlaves, idleSupply, idleWorkers, recruitCapOf, roleCapOf, roleCountOf, worksOf } from "./engine/simulate";
@@ -225,7 +226,7 @@ export function App() {
     return hits.slice(0, 40);
   }, [boardQ, rosterCities, g.chart]);
   const buildSlots = city ? buildSlotsOf(city) : 1;
-  const busyJobs = city ? Object.values(city.buildings).filter((b) => b?.job).length : 0;
+  const busyJobs = city ? plotJobs(city).length : 0;
   const pendingBuild = g.pending.filter((c) => c.kind === "upgrade" && c.cityId === city?.id).length;
   const busyBuild = busyJobs + pendingBuild >= buildSlots;
 
@@ -613,7 +614,7 @@ export function App() {
 
             {modal === "city" && city && mine ? (
               <>
-                <h3>{city.name} · {hamletLabel(hamletOf(city))} LV.{city.buildings.acropolis?.level || 1}{city.peakLevel && city.peakLevel > (city.buildings.acropolis?.level || 1) ? ` (曾${city.peakLevel})` : ""}</h3>
+                <h3>{city.name} · {hamletLabel(hamletOf(city))} LV.{highestLevel(city, "acropolis") || 1}{city.peakLevel && city.peakLevel > (highestLevel(city, "acropolis") || 1) ? ` (曾${city.peakLevel})` : ""}</h3>
                 <div className="row rename-row">
                   <input maxLength={16} value={renameDraft} onChange={(e) => setRenameDraft(e.target.value)} placeholder="城邦之名" />
                   <button className="btn primary" disabled={!renameDraft.trim() || renameDraft.trim() === city.name} onClick={() => {
@@ -636,7 +637,7 @@ export function App() {
                   </p>
                 ) : (
                   <p className="muted">
-                    建筑等级上限 {cityLevelCap(sim, city)}（基础 4 + 城域相连的乡村）。
+                    单座建筑等级上限 {cityLevelCap(sim, city)}（基础 4 + 城域相连的乡村）。同种可多修，受空地限制；升级极慢。
                     相连 {linkedChildrenOf(sim, city).length} 处
                     {childrenOf(sim, city.id).length > linkedChildrenOf(sim, city).length
                       ? `，另有 ${childrenOf(sim, city.id).length - linkedChildrenOf(sim, city).length} 处未相连不计上限`
@@ -666,16 +667,16 @@ export function App() {
 
             {modal === "build" && city && mine ? (
               <>
-                <h3>建造 · 一块空地一座建筑</h3>
+                <h3>建造 · 一块空地一座，同种可多座</h3>
                 {busyBuild ? <p className="err">同时在建已满：市政广场允许 {buildSlots} 座（在建 {busyJobs}、已排队 {pendingBuild}）。</p> : null}
-                {Object.entries(city.buildings).filter(([, b]) => b?.job).length ? (
+                {plotJobs(city).length ? (
                   <div className="build-eta">
-                    {Object.entries(city.buildings).map(([bid, b]) => b?.job ? (
-                      <div key={bid}>
-                        <b>{BUILDINGS[bid as BuildingId].name}</b> 升至 {b.job.to} 级
-                        {" · "}还剩 <em>{remain(b.job.finishAt, g.now)}</em>
+                    {plotJobs(city).map((p) => (
+                      <div key={p.id}>
+                        <b>{p.building ? BUILDINGS[p.building].name : "建筑"}</b> 升至 {p.job!.to} 级
+                        {" · "}还剩 <em>{remain(p.job!.finishAt, g.now)}</em>
                       </div>
-                    ) : null)}
+                    ))}
                   </div>
                 ) : <p className="muted">当前没有正在建造的队列。开工后顶部会显示剩余秒数。</p>}
                 <p className="muted">
@@ -695,34 +696,42 @@ export function App() {
                 )}
                 {(Object.keys(BUILDINGS) as BuildingId[]).filter((bid) => {
                   if (focusPlot?.building) return bid === focusPlot.building;
-                  if (focusPlot) return canBuildOn(bid, focusPlot.kind) && !city.plots.some((p) => p.building === bid);
-                  return Boolean(city.buildings[bid]?.level);
+                  if (focusPlot) return canBuildOn(bid, focusPlot.kind);
+                  return copiesOf(city, bid).length > 0;
                 }).map((bid) => {
                   const def = BUILDINGS[bid];
-                  const lv = city.buildings[bid]?.level || 0;
-                  const job = city.buildings[bid]?.job;
-                  const cost = slaveCostFor(lv + 1);
-                  const workers = workersFor(lv + 1);
-                  const sec = scaleTime(def.baseTime, lv + 1, plotTimeMult(city, bid, focusPlot) * timeFactor);
+                  const here = focusPlot?.building === bid ? focusPlot : undefined;
+                  const lv = here ? workLevel(here) : 0;
+                  const n = copiesOf(city, bid).length;
+                  const sum = city.buildings[bid]?.level || 0;
+                  const job = here?.job;
+                  const next = (here ? lv : 0) + 1;
+                  const cost = slaveCostFor(next);
+                  const workers = workersFor(next);
+                  const sec = scaleTime(def.baseTime, next, plotTimeMult(city, bid, focusPlot) * timeFactor);
+                  const upgrading = Boolean(here && here.building);
                   return (
                     <div className="bld" key={bid}>
                       <div>
-                        {def.name} {lv}级 · 料{cost} · 监工{workers} · 约{sec}秒
+                        {def.name}
+                        {n ? ` · ${n}座合计${sum}级` : ""}
+                        {here ? ` · 此座${lv}级` : ""}
+                        {" · "}料{cost} · 监工{workers} · 约{sec}秒
                         <div className={job ? "build-eta-line" : "muted"}>
                           {def.blurb}
                           {job ? ` · 在建至${job.to}级，剩余 ${remain(job.finishAt, g.now)}` : ""}
                         </div>
                       </div>
-                      <button className="btn tiny" disabled={busyBuild} onClick={() => {
+                      <button className="btn tiny" disabled={busyBuild || !focusPlot || Boolean(job)} onClick={() => {
                         g.addCommand(makeCommand({
                           kind: "upgrade",
-                          label: `建造 ${def.name}（料${cost}/监工${workers}）`,
+                          label: `${upgrading ? "升级" : "修建"} ${def.name}（料${cost}/监工${workers}）`,
                           cityId: city.id,
                           building: bid,
                           plotId: focusPlot?.id,
                         }));
                         setModal("none");
-                      }}>{lv < 1 ? "在此空地建造" : "升级"}</button>
+                      }}>{upgrading ? "升级此座" : "在此空地建造"}</button>
                     </div>
                   );
                 })}
@@ -732,7 +741,7 @@ export function App() {
             {modal === "recruit" && city && mine ? (
               <>
                 <h3>招募 总上限 {recruitCapOf(city)} · 已有编制 {peopleN}</h3>
-                <p className="muted">编制含出征与驻外（乡村）的人，出征不会空出名额再招。奴隶不能招募。用 {SUPPLY_PER_SLAVE} 张本城物资买一张奴隶，或把奴隶转成公民。每种兵由对应建筑等级决定上限。</p>
+                <p className="muted">编制含出征与驻外（乡村）的人，出征不会空出名额再招。奴隶不能招募。用 {SUPPLY_PER_SLAVE} 张本城物资买一张奴隶，或把奴隶转成公民。每种兵由对应建筑合计等级决定上限。</p>
                 <button className="btn" onClick={() => {
                   g.addCommand(makeCommand({ kind: "buy_slave", label: `买奴隶（耗物资${SUPPLY_PER_SLAVE}）`, cityId: city.id }));
                   setModal("none");

@@ -132,7 +132,7 @@ export function ensureSystemNear(world: World, x: number, y: number) {
           buildings: {
             acropolis: { level: Math.min(16, Math.ceil(lv / 2)), wars: [] },
             oikos: { level: Math.min(12, Math.ceil(lv / 3)), wars: [] },
-            wall: { level: Math.min(10, Math.ceil(lv / 3)), wars: [] },
+            wall: { level: Math.min(3, Math.ceil(lv / 3)), wars: [] },
             barracks: { level: Math.min(8, Math.ceil(lv / 4)), wars: [] },
             agora: { level: Math.min(6, Math.ceil(lv / 5)), wars: [] },
             harbor: isWater(terrainAt(pos.x, pos.y)) ? { level: Math.min(6, Math.ceil(lv / 5)), wars: [] } : undefined,

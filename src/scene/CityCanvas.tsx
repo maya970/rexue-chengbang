@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { BUILDINGS, CITY_H, CITY_W } from "../engine/catalog";
 import { cityHeightGrid, isCityRoad } from "../engine/plots";
+import { plotJobs, workLevel } from "../engine/works";
 import type { BuildingId, City, World } from "../types";
 import { blitCity, emptyTile, grassTile, roadTile, walkerTile } from "./cityPixel";
 import { depthOf, drawBlockFaces, inBlock, palette, project, textureIsoTop, visNeighbor } from "./iso";
@@ -141,7 +142,7 @@ export function CityCanvas(props: {
         }
         if (plot?.building) {
           const q = project(lx, ly, water ? 0 : elev, ox, oy, zoom, yaw, CITY_W, CITY_H);
-          drawBuildingMark(ctx, q.x, q.y, zoom, plot.building, city.buildings[plot.building]?.level || 1, yaw);
+          drawBuildingMark(ctx, q.x, q.y, zoom, plot.building, workLevel(plot), yaw);
         }
       }
       for (const w of walkers(now).sort((a, b) => a.order - b.order)) {
@@ -256,11 +257,11 @@ export function CityCanvas(props: {
         {" · "}
         {BUILDINGS.acropolis.name}
         {" · "}点空地建造
-        {Object.entries(props.city.buildings).map(([bid, b]) => b?.job ? (
-          <div key={bid} className="build-eta-line">
-            {BUILDINGS[bid as BuildingId].name} →{b.job.to}级 · 剩余 {Math.max(0, Math.ceil((b.job.finishAt - props.now) / 1000))}秒
+        {plotJobs(props.city).map((p) => (
+          <div key={p.id} className="build-eta-line">
+            {p.building ? BUILDINGS[p.building].name : "建筑"} →{p.job!.to}级 · 剩余 {Math.max(0, Math.ceil((p.job!.finishAt - props.now) / 1000))}秒
           </div>
-        ) : null)}
+        ))}
       </div>
     </div>
   );

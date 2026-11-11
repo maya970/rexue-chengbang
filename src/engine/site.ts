@@ -26,9 +26,9 @@ export function empireTimeFactor(cityCount: number, personCards: number, slaveCa
 }
 
 export function slaveCostFor(nextLevel: number): number {
-  return Math.max(1, Math.ceil(nextLevel / 2));
+  return Math.max(1, 2 ** (nextLevel - 1));
 }
 
 export function workersFor(nextLevel: number): number {
-  return 1 + Math.floor((nextLevel - 1) / 2);
+  return Math.max(1, nextLevel);
 }

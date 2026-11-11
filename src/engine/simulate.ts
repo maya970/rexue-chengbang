@@ -4,7 +4,8 @@ import { buildSlotsOf, citizensOf, garrisonPeople, garrisonShips, homeOf, recrui
 import { resolveFight } from "./combat";
 import { canColonize, canFound, chartOf, CHART, cityIdAt, isWater, npcAt, npcPower, respawnMs, terrainAt } from "./map";
 import { marchSeconds, planPath, posAt, timeAtIndex } from "./path";
-import { ensureCityPlots, findPlotFor, occupyPlot, plotTimeMult, seedCityPlots } from "./plots";
+import { canBuildOn, ensureCityPlots, findEmptyPlot, findPlotFor, plotTimeMult, seedCityPlots } from "./plots";
+import { highestLevel, rebuildBuildings, workLevel } from "./works";
 import {
   bumpPeak,
   canFoundVillage,
@@ -85,6 +86,11 @@ function markWar(city: City | undefined, war: Campaign) {
   for (const b of Object.values(city.buildings)) {
     if (b && !b.wars.some((x) => x.id === war.id)) b.wars.push(war);
   }
+  for (const p of city.plots || []) {
+    if (!p.building) continue;
+    p.wars ||= [];
+    if (!p.wars.some((x) => x.id === war.id)) p.wars.push(war);
+  }
 }
 
 function fillNpcGarrison(world: World, city: City) {
@@ -136,7 +142,7 @@ function makeNpcCity(world: World, x: number, y: number, garrison = false) {
     buildings: {
         acropolis: { level: Math.min(8, 1 + Math.floor(site.level / 3)), wars: [] },
         oikos: { level: Math.min(6, 1 + Math.floor(site.level / 4)), wars: [] },
-        wall: { level: site.kind === "polis" ? 3 : Math.max(1, Math.floor(site.level / 5)), wars: [] },
+        wall: { level: Math.min(3, site.kind === "polis" ? 3 : Math.max(1, Math.floor(site.level / 5))), wars: [] },
         barracks: { level: 1, wars: [] },
         harbor: isWater(terrainAt(x, y)) || site.kind === "pirates" ? { level: 1, wars: [] } : undefined,
         shipyard: site.kind === "pirates" ? { level: 2, wars: [] } : undefined,
@@ -172,16 +178,30 @@ function ensureNpcsNear(world: World, x: number, y: number) {
 }
 
 function finishJobs(world: World, city: City, t: number) {
+  let done = false;
+  for (const p of city.plots || []) {
+    if (p.job && p.job.finishAt <= t) {
+      for (const id of p.job.workerIds || []) {
+        if (world.cards[id]) world.cards[id].jobId = undefined;
+      }
+      p.level = p.job.to;
+      delete p.job;
+      done = true;
+    }
+  }
   for (const [bid, b] of Object.entries(city.buildings)) {
     if (b?.job && b.job.finishAt <= t) {
       for (const id of b.job.workerIds || []) {
         if (world.cards[id]) world.cards[id].jobId = undefined;
       }
-      b.level = b.job.to;
       delete b.job;
       city.buildings[bid as BuildingId] = b;
-      bumpPeak(city);
+      done = true;
     }
+  }
+  if (done) {
+    rebuildBuildings(city);
+    bumpPeak(city);
   }
 }
 
@@ -404,16 +424,22 @@ function damageBuildings(city: City, want: number, soldiers: number, citizens: n
   const ratio = soldiers / Math.max(1, citizens);
   const cap = Math.max(0, Math.floor(buildingLevels(city) * Math.min(1, ratio / 0.6)));
   const n = Math.min(want, cap, bitsWant);
-  const entries = Object.entries(city.buildings).filter(([, b]) => b && b.level > 0) as [BuildingId, NonNullable<City["buildings"][BuildingId]>][];
-  entries.sort((a, b) => a[0].localeCompare(b[0]));
+  const plots = (city.plots || []).filter((p) => p.building && workLevel(p) > 0);
+  plots.sort((a, b) => (a.building || "").localeCompare(b.building || "") || a.id.localeCompare(b.id));
   let left = n;
-  for (const [id, b] of entries) {
+  for (const p of plots) {
     if (left <= 0) break;
-    const cut = Math.min(b.level, left);
-    b.level -= cut;
+    const lv = workLevel(p);
+    const cut = Math.min(lv, left);
+    p.level = lv - cut;
     left -= cut;
-    if (b.level <= 0) delete city.buildings[id];
+    if ((p.level || 0) <= 0) {
+      p.building = undefined;
+      p.level = 0;
+      delete p.job;
+    }
   }
+  rebuildBuildings(city);
   return n - left;
 }
 
@@ -458,7 +484,7 @@ function fightMarch(world: World, march: March, t: number, dest: City | undefine
   }
   const pos = field ? posAt(march.path, march.startAt, march.arriveAt, t) : { x: march.toX, y: march.toY };
   const temple = dest && !field ? (dest.buildings.temple?.level || 0) : 0;
-  const wallBonus = dest && !field ? Math.floor((dest.buildings.wall?.level || 0) / 3) : 0;
+  const wallBonus = dest && !field ? (dest.buildings.wall?.level || 0) : 0;
   const fight = resolveFight({
     id: field ? `field:${clashKey(march.id, foe?.id || "x", `${pos.x},${pos.y}`)}` : `btl:${march.id}`,
     entropy: march.entropy,
@@ -1180,21 +1206,30 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     const def = BUILDINGS[bid];
     ensureCityPlots(city);
     if (def.needCoast && !isWater(terrainAt(city.x, city.y))) return skip(world, cmd, "港口与船厂要建在海岸或海域城");
-    const cur = city.buildings[bid] || { level: 0, wars: [] };
-    const busyJobs = Object.values(city.buildings).filter((b) => b?.job).length;
+    const busyJobs = (city.plots || []).filter((p) => p.job).length;
     const slots = buildSlotsOf(city);
     if (busyJobs >= slots) return skip(world, cmd, `同时在建已满（市政广场允许 ${slots} 座）`);
-    const plot = findPlotFor(city, bid, cmd.plotId);
-    if (!plot) return skip(world, cmd, cur.level < 1 ? "空地不符或已被占用，一块空地只能建一座建筑" : "找不到这座建筑的地块");
-    const acro = city.buildings.acropolis?.level || 1;
-    if (bid !== "acropolis" && cur.level >= acro) return skip(world, cmd, "需先升级卫城");
-    if (cur.level >= def.max) return skip(world, cmd, "已达最高等级");
-    const next = cur.level + 1;
+    const pickedPlot = cmd.plotId ? city.plots.find((p) => p.id === cmd.plotId) : undefined;
+    let plot = pickedPlot;
+    if (pickedPlot?.building && pickedPlot.building !== bid) return skip(world, cmd, "这块空地已有其他建筑");
+    if (pickedPlot && !pickedPlot.building && !canBuildOn(bid, pickedPlot.kind)) {
+      return skip(world, cmd, "空地种类不符");
+    }
+    if (!plot) plot = findPlotFor(city, bid, cmd.plotId);
+    if (!plot) return skip(world, cmd, "请点一块相符的空地。同种建筑可建多座，每块空地一座");
+    const isNew = !plot.building;
+    if (isNew && !findEmptyPlot(city, bid, plot.id)) return skip(world, cmd, "空地不符或已被占用");
+    const curLv = isNew ? 0 : workLevel(plot);
+    if (plot.job) return skip(world, cmd, "这座建筑正在施工");
+    const acro = highestLevel(city, "acropolis") || 1;
+    if (bid !== "acropolis" && curLv >= acro) return skip(world, cmd, "需先升级卫城");
+    if (curLv >= def.max) return skip(world, cmd, bid === "wall" ? "城墙单座最高 3 级，请另找空地再修一座" : "已达最高等级");
+    const next = curLv + 1;
     const cap = cityLevelCap(world, city);
     if (next > cap) {
       return skip(world, cmd, isHamlet(city)
         ? "附属聚落请用「升级为郊区/城区」"
-        : `本城等级上限 ${cap}。在大地图围绕城市一圈圈修建乡村可解锁更高上限`);
+        : `单座等级上限 ${cap}。空地不够时，围绕城市一圈圈修建乡村：乡村自带空地，相连后还提高本城单座上限`);
     }
     const cost = slaveCostFor(next);
     const need = workersFor(next);
@@ -1206,11 +1241,16 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
       return skip(world, cmd, "监工人选已被占用");
     }
     if (!consumeMaterials(world, city.id, cost)) return skip(world, cmd, `建造需要 ${cost} 张物资或奴隶折算`);
-    occupyPlot(city, bid, plot.id);
+    if (isNew) {
+      plot.building = bid;
+      plot.level = 0;
+    }
     const jobId = uniqueId([batchKey, cmd.id, "job"]);
     lockWorkers(world, workers, jobId);
-    const time = scaleTime(def.baseTime, next, (1 - (city.buildings.agora?.level || 0) * 0.02) * plotTimeMult(city, bid, plot) * ownerScale(world, owner)) * 1000;
-    city.buildings[bid] = { ...cur, level: cur.level, job: { to: next, finishAt: t + time, workerIds: workers.map((c) => c.id), material: cost } };
+    const agoraCut = Math.min(0.5, (city.buildings.agora?.level || 0) * 0.02);
+    const time = scaleTime(def.baseTime, next, (1 - agoraCut) * plotTimeMult(city, bid, plot) * ownerScale(world, owner)) * 1000;
+    plot.job = { to: next, finishAt: t + time, workerIds: workers.map((c) => c.id), material: cost };
+    rebuildBuildings(city);
     return;
   }
 
