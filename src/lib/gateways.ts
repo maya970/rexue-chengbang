@@ -27,6 +27,11 @@ let hotOrigin = "";
 let hotGql = "";
 let hotGqlAt = 0;
 
+function nodeEnv(key: string): string {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  return env?.[key] || "";
+}
+
 function envOrigin(): string {
   try {
     const vite = (import.meta as ImportMeta).env?.VITE_ARWEAVE_GATEWAY;
@@ -34,11 +39,8 @@ function envOrigin(): string {
   } catch {
     /* node */
   }
-  if (typeof process !== "undefined") {
-    const v = process.env?.ARWEAVE_GATEWAY || process.env?.VITE_ARWEAVE_GATEWAY;
-    if (v) return v.replace(/\/$/, "");
-  }
-  return "";
+  const v = nodeEnv("ARWEAVE_GATEWAY") || nodeEnv("VITE_ARWEAVE_GATEWAY");
+  return v.replace(/\/$/, "");
 }
 
 export function gatewayOrigins(): string[] {
@@ -62,9 +64,8 @@ export function graphqlEndpoints(): string[] {
   } catch {
     /* node */
   }
-  if (typeof process !== "undefined" && process.env?.ARWEAVE_GQL) {
-    preferred.unshift(process.env.ARWEAVE_GQL);
-  }
+  const gql = nodeEnv("ARWEAVE_GQL");
+  if (gql) preferred.unshift(gql);
   if (extra) preferred.unshift(`${extra}/graphql`);
   return [...new Set([...preferred, SEARCH_GQL])];
 }
