@@ -17,6 +17,9 @@ import type { Command, MarketPair, TrackedBatch, WorldCheckpoint } from "../type
 export function useGame() {
   const [jwk, setJwk] = useState<Jwk | null>(null);
   const [address, setAddress] = useState("");
+  const [booting, setBooting] = useState(true);
+  const [worldReady, setWorldReady] = useState(false);
+  const [loadingWorld, setLoadingWorld] = useState(false);
   const [pending, setPending] = useState<Command[]>([]);
   const [batches, setBatches] = useState<TrackedBatch[]>([]);
   const [checkpoint, setCheckpoint] = useState<WorldCheckpoint | null>(null);
@@ -36,12 +39,19 @@ export function useGame() {
 
   useEffect(() => {
     const existing = loadJwk();
-    if (!existing) return;
+    if (!existing) {
+      setBooting(false);
+      return;
+    }
     setJwk(existing);
-    jwkAddress(existing).then(setAddress).catch(() => setError("本地钱包损坏，请重新导入"));
+    jwkAddress(existing)
+      .then(setAddress)
+      .catch(() => setError("本地钱包损坏，请重新导入"))
+      .finally(() => setBooting(false));
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoadingWorld(true);
     try {
       await loadNetworkGateways().catch(() => undefined);
       const snap = await fetchSnapshot();
@@ -60,14 +70,19 @@ export function useGame() {
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (!quiet) setLoadingWorld(false);
+      setWorldReady(true);
     }
   }, []);
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 15000);
+    if (!address) return;
+    setWorldReady(false);
+    void load(false);
+    const t = setInterval(() => { void load(true); }, 15000);
     return () => clearInterval(t);
-  }, [load]);
+  }, [load, address]);
 
   const foldInput = useMemo(() => {
     if (!pending.length || !address) return batches;
@@ -158,6 +173,9 @@ export function useGame() {
     clearJwk();
     setJwk(null);
     setAddress("");
+    setWorldReady(false);
+    setCheckpoint(null);
+    setPending([]);
   }, []);
 
   const payForCard = useCallback(async (seller: string, winston: number, cardId: string, listingId: string, cityId: string) => {
@@ -220,6 +238,9 @@ export function useGame() {
   }, [address, jwk, pending]);
 
   return {
+    booting,
+    worldReady,
+    loadingWorld,
     address,
     pending,
     batches,

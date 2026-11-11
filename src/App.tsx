@@ -15,9 +15,11 @@ import { formatReport, playerWon, reportHay } from "./i18n/report";
 import { useGame } from "./hooks/useGame";
 import { makeCommand, statusLabel } from "./lib/cmd";
 import { shortAddr } from "./lib/wallet";
+import { sendCam } from "./lib/cam";
 import { AtlasCanvas } from "./scene/AtlasCanvas";
 import { CityCanvas } from "./scene/CityCanvas";
 import { EmpireHud } from "./scene/EmpireHud";
+import { Gate } from "./scene/Gate";
 import { WorldCanvas } from "./scene/WorldCanvas";
 import type { BuildingId, MarchMission, RoleId } from "./types";
 
@@ -30,6 +32,7 @@ function remain(ms: number, now: number) {
 type Modal = "none" | "tile" | "city" | "recruit" | "squad" | "build" | "card" | "reports" | "guild" | "atlas" | "help";
 type RosterTab = "cities" | "people" | "slaves" | "goods" | "marches";
 type BoardCat = "all" | "win" | "lose" | "scout" | "colonize" | "fight" | "reinforce" | "mine" | "join" | "big";
+type DrawerId = "none" | "menu" | "stock" | "roster" | "queue" | "view";
 
 function hay(parts: (string | number | undefined)[]) {
   return parts.filter((x) => x !== undefined).join(" ").toLowerCase();
@@ -51,6 +54,20 @@ export function App() {
   const [recruitQty, setRecruitQty] = useState<Partial<Record<RoleId, number>>>({});
   const [rosterOpen, setRosterOpen] = useState(false);
   const [stockOpen, setStockOpen] = useState(false);
+  const [drawer, setDrawer] = useState<DrawerId>("none");
+
+  function toggleDrawer(id: Exclude<DrawerId, "none">) {
+    const next = drawer === id ? "none" : id;
+    setDrawer(next);
+    setStockOpen(next === "stock");
+    setRosterOpen(next === "roster");
+  }
+
+  function closeDrawers() {
+    setDrawer("none");
+    setStockOpen(false);
+    setRosterOpen(false);
+  }
   const [cityPins, setCityPins] = useState<{ id: string; name: string; x: number; y: number }[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("rexue-chengbang-my-cities") || "[]") as { id: string; name: string; x: number; y: number }[];
@@ -163,14 +180,14 @@ export function App() {
     setToast(null);
     setBoardQ("");
     setBoardCat("all");
-    setRosterOpen(false);
+    closeDrawers();
     setModal("reports");
   }
 
   function openBoard(kind: "guild" | "atlas" | "help") {
     setBoardQ("");
     setBoardCat("all");
-    setRosterOpen(false);
+    closeDrawers();
     setModal(kind);
   }
 
@@ -255,7 +272,7 @@ export function App() {
     g.enterChart(ch.cx, ch.cy, { x: c.x, y: c.y });
     setInside(enter && Boolean(sim.cities[id]));
     setModal("none");
-    setRosterOpen(false);
+    closeDrawers();
   }
 
   function jumpCard(id: string) {
@@ -270,7 +287,7 @@ export function App() {
     setCardId(card.id);
     setInside(false);
     setModal("card");
-    setRosterOpen(false);
+    closeDrawers();
   }
 
   function enterOwnCity(id: string) {
@@ -286,12 +303,25 @@ export function App() {
     setModal("none");
   }
 
+  if (g.booting || !g.address) {
+    return <Gate booting={g.booting} error={g.error} onCreate={g.create} onImport={g.doImport} />;
+  }
+
   return (
-    <div className="app app-3d">
+    <div className={`app app-3d${drawer !== "none" ? ` drawer-${drawer}` : ""}`}>
       <header className="top">
+        <div className="drawer-tabs drawer-tabs-top" role="tablist">
+          <button type="button" className={drawer === "menu" ? "on" : ""} onClick={() => toggleDrawer("menu")}>
+            菜单{incoming.length ? ` ${incoming.length}` : ""}
+          </button>
+          <button type="button" className={drawer === "stock" ? "on" : ""} onClick={() => toggleDrawer("stock")}>库藏</button>
+          <button type="button" className={drawer === "roster" ? "on" : ""} onClick={() => toggleDrawer("roster")}>名册</button>
+          <button type="button" className="drawer-fold" onClick={closeDrawers} disabled={drawer === "none"}>收起</button>
+        </div>
+        <div className="chrome-body">
         <nav className="top-nav">
           {g.address ? (
-            <button className={`btn tiny${stockOpen ? " primary" : ""}`} onClick={() => setStockOpen((v) => !v)}>
+            <button className={`btn tiny desk-dup${stockOpen ? " primary" : ""}`} onClick={() => toggleDrawer("stock")}>
               {stockOpen ? "收起库藏" : "库藏"}
             </button>
           ) : null}
@@ -302,7 +332,7 @@ export function App() {
           <button className="btn tiny" onClick={() => openBoard("atlas")}>{t("atlas")}</button>
           <button className="btn tiny" onClick={() => openBoard("help")}>{t("help")}</button>
           <LangSelect compact />
-          <button className="btn tiny primary" onClick={() => setRosterOpen((v) => !v)}>
+          <button className="btn tiny primary desk-dup" onClick={() => toggleDrawer("roster")}>
             {rosterOpen ? "收起名册" : "我的名册"}
           </button>
           {(g.myCities[0] || rosterCities[0]) && !inside ? (
@@ -341,9 +371,22 @@ export function App() {
             </>
           )}
         </div>
+        </div>
       </header>
 
       <div className="stage">
+        {g.loadingWorld && !g.worldReady ? (
+          <div className="boot-veil">
+            <p>正在载入天下…</p>
+            {g.error ? (
+              <>
+                <p className="err">{g.error}</p>
+                <button className="btn tiny" type="button" onClick={() => void g.load(false)}>重试</button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+        {drawer !== "none" ? <button type="button" className="drawer-scrim" aria-label="收起" onClick={closeDrawers} /> : null}
         {g.address && stockOpen ? (
           <EmpireHud
             address={g.address}
@@ -385,14 +428,13 @@ export function App() {
             <button className="btn tiny" onClick={() => g.goChart(1, 0)}>东</button>
           </div>
         ) : null}
-      </div>
 
       {rosterOpen ? (
           <aside className="map-menu">
             <div className="map-menu-head">
               <b>我的名册</b>
               <span className="muted">点一项才跳转，不铺在地图上</span>
-              <button className="btn tiny" style={{ marginLeft: "auto" }} onClick={() => setRosterOpen(false)}>关闭</button>
+              <button className="btn tiny" style={{ marginLeft: "auto" }} onClick={closeDrawers}>关闭</button>
             </div>
             <div className="map-menu-tabs">
               {([
@@ -457,7 +499,7 @@ export function App() {
                   <div className="card" key={m.id} onClick={() => {
                     const ch = chartOf(m.toX, m.toY);
                     g.enterChart(ch.cx, ch.cy, { x: m.toX, y: m.toY });
-                    setRosterOpen(false);
+                    closeDrawers();
                   }}>
                     <div>{MISSION_NAME[m.mission]}<small>去 ({m.toX},{m.toY}) · {m.personIds.length} 人</small></div>
                     <button className="btn tiny">查找</button>
@@ -467,6 +509,7 @@ export function App() {
             </div>
           </aside>
         ) : null}
+      </div>
 
       {toast ? (
         <button className="report-toast" onClick={openReports}>
@@ -485,7 +528,7 @@ export function App() {
 
       {modal !== "none" ? (
         <div className="modal-back" onClick={() => setModal("none")}>
-          <div className={boardModal ? "modal board" : "modal"} onClick={(e) => e.stopPropagation()}>
+          <div className={`modal${boardModal ? " board" : ""}${modal === "atlas" ? " atlas-modal" : ""}`} onClick={(e) => e.stopPropagation()}>
             <button className="btn tiny modal-x" onClick={() => setModal("none")}>{t("close")}</button>
             {modal === "tile" && sel ? (
               <>
@@ -971,9 +1014,47 @@ export function App() {
         </div>
       ) : null}
 
+      <section className="view-sheet">
+        <div className="dock-head">
+          <b>视野</b>
+          <button type="button" className="btn tiny dock-close" onClick={closeDrawers}>收起</button>
+        </div>
+        <div className="view-cam">
+          <button type="button" className="btn tiny" onClick={() => sendCam("out")}>－</button>
+          <button type="button" className="btn tiny" onClick={() => sendCam("in")}>＋</button>
+          <button type="button" className="btn tiny" onClick={() => sendCam("rotate")}>转视角</button>
+          <button type="button" className="btn tiny" onClick={() => sendCam("reset")}>回正</button>
+        </div>
+        {!inside ? (
+          <div className="view-cam">
+            <button type="button" className="btn tiny" onClick={() => sendCam("terrain")}>地形</button>
+            <button type="button" className="btn tiny" onClick={() => sendCam("claims")}>连通图</button>
+            <button type="button" className="btn tiny" onClick={() => sendCam("realm")}>城域</button>
+          </div>
+        ) : null}
+        <div className="view-cam">
+          <span className="muted">{chartName(g.chart.cx, g.chart.cy)}</span>
+          <button type="button" className="btn tiny" onClick={() => g.goChart(0, -1)}>北</button>
+          <button type="button" className="btn tiny" onClick={() => g.goChart(0, 1)}>南</button>
+          <button type="button" className="btn tiny" onClick={() => g.goChart(-1, 0)}>西</button>
+          <button type="button" className="btn tiny" onClick={() => g.goChart(1, 0)}>东</button>
+        </div>
+        <div className="view-cam">
+          {(g.myCities[0] || rosterCities[0]) && !inside ? (
+            <button type="button" className="btn tiny" onClick={() => jumpCity((g.myCities[0] || rosterCities[0]).id)}>一键回城</button>
+          ) : null}
+          {mine && !inside ? <button type="button" className="btn tiny" onClick={() => { setInside(true); setModal("none"); closeDrawers(); }}>进入城市</button> : null}
+          {inside ? <button type="button" className="btn tiny" onClick={() => setInside(false)}>回到大地图</button> : null}
+        </div>
+      </section>
+
       <footer className="dock">
         <div>
-          <div className="muted">联网指令：排队中 → 已上传 → 链上可查到才发送完毕。别人的地块不加载细目。进攻须清空路径上的聚落。</div>
+          <div className="dock-head">
+            <b>联网指令</b>
+            <button type="button" className="btn tiny dock-close" onClick={closeDrawers}>收起</button>
+          </div>
+          <div className="muted dock-hint">联网指令：排队中 → 已上传 → 链上可查到才发送完毕。别人的地块不加载细目。进攻须清空路径上的聚落。</div>
           <div className="queue">
             {g.pending.length === 0 ? <div className="muted">空</div> : null}
             {g.pending.map((c) => (
@@ -993,6 +1074,14 @@ export function App() {
           执行指令
         </button>
       </footer>
+
+      <nav className="drawer-tabs drawer-tabs-bottom" role="tablist">
+        <button type="button" className={drawer === "view" ? "on" : ""} onClick={() => toggleDrawer("view")}>地图</button>
+        <button type="button" className={drawer === "queue" ? "on" : ""} onClick={() => toggleDrawer("queue")}>
+          指令{g.pending.length ? ` ${g.pending.length}` : ""}
+        </button>
+        <button type="button" className="drawer-fold" onClick={closeDrawers} disabled={drawer === "none"}>收起</button>
+      </nav>
     </div>
   );
 }

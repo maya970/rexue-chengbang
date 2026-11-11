@@ -19,6 +19,7 @@ import {
   TW,
 } from "./iso";
 import { drawCityMark } from "./isoMarks";
+import { listenCam } from "../lib/cam";
 import { MapTools } from "./MapTools";
 
 export type MapViewMode = "terrain" | "claims" | "realm";
@@ -58,6 +59,14 @@ export function WorldCanvas(props: {
     rotate: () => {},
     reset: () => {},
   });
+
+  useEffect(() => listenCam((action) => {
+    if (action === "in") camRef.current.zoomIn();
+    else if (action === "out") camRef.current.zoomOut();
+    else if (action === "rotate") camRef.current.rotate();
+    else if (action === "reset") camRef.current.reset();
+    else setMode(action);
+  }), []);
 
   useEffect(() => {
     const el = host.current;

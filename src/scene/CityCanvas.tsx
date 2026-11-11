@@ -6,6 +6,7 @@ import type { BuildingId, City, World } from "../types";
 import { blitCity, emptyTile, grassTile, roadTile, walkerTile } from "./cityPixel";
 import { depthOf, drawBlockFaces, inBlock, palette, project, textureIsoTop, visNeighbor } from "./iso";
 import { drawBuildingMark } from "./isoMarks";
+import { listenCam } from "../lib/cam";
 import { MapTools } from "./MapTools";
 
 export function CityCanvas(props: {
@@ -25,6 +26,13 @@ export function CityCanvas(props: {
     rotate: () => {},
     reset: () => {},
   });
+
+  useEffect(() => listenCam((action) => {
+    if (action === "in") camRef.current.zoomIn();
+    else if (action === "out") camRef.current.zoomOut();
+    else if (action === "rotate") camRef.current.rotate();
+    else if (action === "reset") camRef.current.reset();
+  }), []);
 
   useEffect(() => {
     const el = host.current;

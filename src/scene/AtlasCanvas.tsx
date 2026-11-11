@@ -155,8 +155,11 @@ export function AtlasCanvas(props: {
     window.addEventListener("pointerup", onUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener("resize", resize);
+    const ro = new ResizeObserver(() => resize());
+    ro.observe(el);
     return () => {
       cancelAnimationFrame(raf);
+      ro.disconnect();
       canvas.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
