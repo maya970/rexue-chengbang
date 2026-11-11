@@ -10,7 +10,7 @@ import { alliesOf, buildSlotsOf, citizensOf, corridorBlocked, homeOf, idleSlaves
 import { loadInbox, mergeInbox } from "./lib/inbox";
 import { HelpBoard } from "./i18n/HelpBoard";
 import { LangSelect, useI18n } from "./i18n";
-import { formatReport, reportHay } from "./i18n/report";
+import { formatReport, playerWon, reportHay } from "./i18n/report";
 import { useGame } from "./hooks/useGame";
 import { makeCommand, statusLabel } from "./lib/cmd";
 import { shortAddr } from "./lib/wallet";
@@ -171,8 +171,8 @@ export function App() {
   const filteredReports = useMemo(() => {
     const q = boardQ.trim().toLowerCase();
     return mineReports.filter((r) => {
-      if (boardCat === "win" && !r.win) return false;
-      if (boardCat === "lose" && r.win) return false;
+      if (boardCat === "win" && !playerWon(r, g.address)) return false;
+      if (boardCat === "lose" && playerWon(r, g.address)) return false;
       if (boardCat === "scout" && r.code !== "scout" && r.aftermath !== "scout" && !r.title.includes("侦察") && !r.title.toLowerCase().includes("scout")) return false;
       if (boardCat === "colonize" && r.aftermath !== "colonize" && r.code !== "colonizeOk" && r.code !== "colonizeFail" && !r.title.includes("殖民")) return false;
       if (boardCat === "reinforce" && r.aftermath !== "reinforce" && r.code !== "reinforceOk" && r.code !== "reinforceBack" && !r.title.includes("增援")) return false;
@@ -180,7 +180,7 @@ export function App() {
       if (!q) return true;
       return hay([r.x, r.y, reportHay(locale, r), ...(r.deadNames || [])]).includes(q);
     });
-  }, [mineReports, boardQ, boardCat, locale]);
+  }, [mineReports, boardQ, boardCat, locale, g.address]);
 
   const filteredGuilds = useMemo(() => {
     const q = boardQ.trim().toLowerCase();
@@ -451,12 +451,12 @@ export function App() {
       {toast ? (
         <button className="report-toast" onClick={openReports}>
           {(() => {
-            const mail = formatReport(locale, toast);
+            const mail = formatReport(locale, toast, g.address);
             return (
               <>
-                <b>{mail.toast}</b> {toast.win ? mail.toastOk : mail.toastBad} · {mail.title}
+                <b>{mail.toast}</b> {mail.badge} · {mail.stance} · {mail.title}
                 {mail.loot ? ` · ${mail.loot}` : ""}
-                {toast.deadNames?.length ? ` · ${mail.dead}` : ""}
+                {mail.dead ? ` · ${mail.dead}` : ""}
               </>
             );
           })()}
@@ -479,7 +479,7 @@ export function App() {
                     {selCity.systemRank ? " 可占领、劫掠、屠城，不能毁灭。" : ""}
                   </p>
                 ) : selNpc ? (
-                  <p>{selNpc.name} 等级 {selNpc.level}。须进攻清理才能连通这一格。连通过的格子不再刷新野蛮人；未连通的格子还会刷，并会切断你的连通。</p>
+                  <p>{selNpc.name} 等级 {selNpc.level}。{selNpc.kind === "pirates" ? "海上海盗，图标是海盗旗与船，不是陆地部落。" : "陆地野蛮人聚落，与玩家城邦不是同一套图标。"}须进攻清理才能连通。连通过的格子不再刷新；未连通处仍会刷并切断你的连通。</p>
                 ) : (
                   <p>
                     {g.myCities.length
@@ -495,7 +495,9 @@ export function App() {
                   <p className="muted">
                     {selCity
                       ? selCity.npc
-                        ? "野蛮人聚落：须进攻占领或毁灭才能连通，侦察不能夺格。"
+                        ? (selCity.owner || "").includes("pirates")
+                          ? "海盗船队：海上独立图标。须进攻清理才能连通，侦察不能夺格。"
+                          : "野蛮人聚落：不是玩家城。须进攻占领或毁灭才能连通，侦察不能夺格。"
                         : isHamlet(selCity)
                         ? selCity.owner === g.address
                           ? "这是你的附属乡村，可增援驻军。要占地须进攻别人的乡村。"
@@ -868,10 +870,10 @@ export function App() {
                 </div>
                 <div className="board-body">
                   {filteredReports.length ? filteredReports.map((r) => {
-                    const mail = formatReport(locale, r);
+                    const mail = formatReport(locale, r, g.address);
                     return (
                       <article key={r.id} className="report">
-                        <h4>{mail.badge} · {mail.title} ({r.x},{r.y})</h4>
+                        <h4>{mail.badge} · {mail.stance} · {mail.title} ({r.x},{r.y})</h4>
                         <p className="muted">{new Date(r.time).toLocaleString()}{mail.aftermath ? ` · ${mail.aftermath}` : ""}</p>
                         {mail.rounds.map((round, i) => <p key={i}><b>{round.title}</b> {round.text}</p>)}
                         {mail.loot ? <p>{mail.loot}</p> : null}

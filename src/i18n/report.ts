@@ -8,7 +8,12 @@ function fill(tpl: string, params: Record<string, string | number | boolean | un
 }
 
 const zhCN: ReportDict = {
-  win: "成", lose: "败",
+  win: "我胜", lose: "我败",
+  atkWin: "我方作为进攻方胜利", atkLose: "我方作为进攻方失败",
+  defWin: "我方作为防守方胜利", defLose: "我方作为防守方失败",
+  foeAtkWin: "敌方作为进攻方胜利", foeDefWin: "敌方作为防守方胜利",
+  deadMine: "我方阵亡：{names}", deadFoe: "敌方阵亡：{names}",
+  deadAtkSide: "进攻方阵亡：{names}", deadDefSide: "防守方阵亡：{names}",
   fieldWin: "野外奏捷", fieldLose: "野外受挫", siegeWin: "攻城奏凯", siegeLose: "攻城失利",
   scout: "侦察回报", reinforceOk: "增援抵达", reinforceBack: "增援折返",
   colonizeFail: "殖民失败", colonizeOk: "殖民成功", empty: "{mission}无果", home: "军团入城",
@@ -63,7 +68,7 @@ const zhCN: ReportDict = {
 
 const zhTW: ReportDict = {
   ...zhCN,
-  win: "成", lose: "敗",
+  win: "我勝", lose: "我敗",
   fieldWin: "野外奏捷", fieldLose: "野外受挫", siegeWin: "攻城奏凱", siegeLose: "攻城失利",
   scout: "偵察回報", reinforceOk: "增援抵達", reinforceBack: "增援折返",
   colonizeFail: "殖民失敗", colonizeOk: "殖民成功", empty: "{mission}無果", home: "軍團入城",
@@ -114,7 +119,12 @@ const zhTW: ReportDict = {
 };
 
 const en: ReportDict = {
-  win: "W", lose: "L",
+  win: "We won", lose: "We lost",
+  atkWin: "Victory as the attacker", atkLose: "Defeat as the attacker",
+  defWin: "Victory as the defender", defLose: "Defeat as the defender",
+  foeAtkWin: "The enemy won as the attacker", foeDefWin: "The enemy won as the defender",
+  deadMine: "Our dead: {names}", deadFoe: "Enemy dead: {names}",
+  deadAtkSide: "Attacker dead: {names}", deadDefSide: "Defender dead: {names}",
   fieldWin: "Field victory", fieldLose: "Field setback", siegeWin: "Siege victory", siegeLose: "Siege lost",
   scout: "Scout report", reinforceOk: "Reinforcements arrived", reinforceBack: "Reinforcements returned",
   colonizeFail: "Colonize failed", colonizeOk: "Colony founded", empty: "{mission} found nothing", home: "Army entered the city",
@@ -296,17 +306,41 @@ export function formatRound(locale: LocaleId, round: BattleRound): { title: stri
   return { title: t(locale, titleKey, p), text: t(locale, bodyKey, p) };
 }
 
-export function formatReport(locale: LocaleId, r: BattleReport) {
+export function playerWon(r: BattleReport, me?: string) {
+  if (!me) return r.win;
+  if (r.attacker === me) return r.win;
+  if (r.defender === me) return !r.win;
+  return r.win;
+}
+
+export function formatReport(locale: LocaleId, r: BattleReport, me?: string) {
   const title = reportTitle(locale, r);
-  const badge = r.win ? t(locale, "win") : t(locale, "lose");
+  const iAtk = Boolean(me && r.attacker === me);
+  const iDef = Boolean(me && r.defender === me);
+  const mineWin = playerWon(r, me);
+  const stance = iAtk
+    ? t(locale, mineWin ? "atkWin" : "atkLose")
+    : iDef
+      ? t(locale, mineWin ? "defWin" : "defLose")
+      : t(locale, r.win ? "foeAtkWin" : "foeDefWin");
+  const badge = me ? (mineWin ? t(locale, "win") : t(locale, "lose")) : (r.win ? t(locale, "foeAtkWin") : t(locale, "foeDefWin"));
   const rounds = (r.rounds || []).map((x) => formatRound(locale, x));
   const loot = r.slaves || r.supplies ? t(locale, "loot", { slaves: r.slaves || 0, supplies: r.supplies || 0 }) : "";
-  const dead = r.deadNames?.length ? t(locale, "dead", { names: r.deadNames.join(locale.startsWith("zh") ? "、" : ", ") }) : "";
+  const join = locale.startsWith("zh") ? "、" : ", ";
+  const atkDead = r.deadAtkNames || [];
+  const defDead = r.deadDefNames || [];
+  const mineDead = iAtk ? atkDead : iDef ? defDead : [];
+  const foeDead = iAtk ? defDead : iDef ? atkDead : [];
+  const deadMine = mineDead.length ? t(locale, "deadMine", { names: mineDead.join(join) }) : "";
+  const deadFoe = foeDead.length ? t(locale, "deadFoe", { names: foeDead.join(join) }) : "";
+  const dead = deadMine || deadFoe
+    ? [deadMine, deadFoe].filter(Boolean).join(locale.startsWith("zh") ? "。" : ". ")
+    : r.deadNames?.length ? t(locale, "dead", { names: r.deadNames.join(join) }) : "";
   const aftermath = r.aftermath ? missionName(locale, r.aftermath) : "";
-  return { title, badge, rounds, loot, dead, aftermath, toast: t(locale, "toast"), toastOk: t(locale, "toastOk"), toastBad: t(locale, "toastBad") };
+  return { title, badge, stance, rounds, loot, dead, deadMine, deadFoe, aftermath, mineWin, toast: t(locale, "toast"), toastOk: t(locale, "toastOk"), toastBad: t(locale, "toastBad") };
 }
 
 export function reportHay(locale: LocaleId, r: BattleReport) {
   const f = formatReport(locale, r);
-  return [f.badge, f.title, f.aftermath, f.loot, f.dead, ...f.rounds.flatMap((x) => [x.title, x.text])].join(" ").toLowerCase();
+  return [f.badge, f.stance, f.title, f.aftermath, f.loot, f.dead, ...f.rounds.flatMap((x) => [x.title, x.text])].join(" ").toLowerCase();
 }

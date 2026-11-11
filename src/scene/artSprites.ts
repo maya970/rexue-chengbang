@@ -2,11 +2,14 @@ import type { BuildingId, HamletKind } from "../types";
 
 const SETTLE_URL = "./art/settlements.jpg";
 const BUILD_URL = "./art/buildings.jpg";
+const NPC_URL = "./art/npc.jpg";
 
 const settleCache: HTMLCanvasElement[] = [];
 const buildCache: HTMLCanvasElement[] = [];
+const npcCache: HTMLCanvasElement[] = [];
 let settleReady = false;
 let buildReady = false;
+let npcReady = false;
 
 function isMagenta(r: number, g: number, b: number, a: number) {
   if (a < 8) return true;
@@ -105,6 +108,7 @@ function loadSheet(url: string, keep: number, into: HTMLCanvasElement[], done: (
 
 loadSheet(SETTLE_URL, 6, settleCache, (ok) => { settleReady = ok; });
 loadSheet(BUILD_URL, 10, buildCache, (ok) => { buildReady = ok; });
+loadSheet(NPC_URL, 3, npcCache, (ok) => { npcReady = ok; });
 
 const SETTLE_IDX: Record<string, number> = {
   city: 0,
@@ -128,8 +132,12 @@ const BUILD_IDX: Record<BuildingId, number> = {
   harbor: 9,
 };
 
-export function settleSprite(kind: HamletKind | "barbarian" | "system") {
+export function settleSprite(kind: HamletKind | "barbarian" | "pirate" | "ruin" | "system") {
+  if (kind === "barbarian" && npcReady && npcCache[0]) return npcCache[0];
+  if (kind === "pirate" && npcReady && npcCache[1]) return npcCache[1];
+  if (kind === "ruin" && npcReady && npcCache[2]) return npcCache[2];
   if (!settleReady) return undefined;
+  if (kind === "barbarian" || kind === "pirate" || kind === "ruin") return settleCache[SETTLE_IDX.barbarian];
   return settleCache[SETTLE_IDX[kind] ?? 0];
 }
 
@@ -147,11 +155,11 @@ export function plantSprite(
   scale: number,
   opts?: { width?: number; flip?: boolean; foot?: number },
 ) {
-  const tw = (opts?.width ?? 1.02) * 40 * scale;
+  const tw = (opts?.width ?? 0.88) * 40 * scale;
   const iw = "width" in img ? Number(img.width) : tw;
   const ih = "height" in img ? Number(img.height) : tw;
   const h = tw * (ih / Math.max(1, iw));
-  const foot = (opts?.foot ?? 0.58) * 20 * scale;
+  const foot = (opts?.foot ?? 0.92) * 20 * scale;
   const dy = y + foot - h;
   ctx.save();
   ctx.imageSmoothingEnabled = true;

@@ -29,9 +29,14 @@ export function hamletPal(kind: HamletKind) {
   return CASTLE_PAL;
 }
 
-function markKind(city: City): HamletKind | "barbarian" | "system" {
+function markKind(city: City): HamletKind | "barbarian" | "pirate" | "ruin" | "system" {
   if (city.systemRank) return "system";
-  if (city.npc && !(city.owner || "").includes("polis")) return "barbarian";
+  if (city.npc) {
+    const who = city.owner || "";
+    if (who.includes("pirates")) return "pirate";
+    if (who.includes("polis")) return "ruin";
+    return "barbarian";
+  }
   return hamletOf(city);
 }
 
@@ -39,8 +44,8 @@ export function drawCityMark(ctx: CanvasRenderingContext2D, x: number, y: number
   const kind = markKind(city);
   const spr = settleSprite(kind);
   if (spr) {
-    const width = kind === "village" ? 0.82 : kind === "city" || kind === "system" ? 1.12 : 0.96;
-    plantSprite(ctx, spr, x, y, scale, { width, flip: (yaw & 1) === 1, foot: 0.62 });
+    const width = kind === "village" || kind === "barbarian" ? 0.78 : kind === "pirate" ? 0.86 : 0.9;
+    plantSprite(ctx, spr, x, y, scale, { width, flip: (yaw & 1) === 1, foot: 0.94 });
     return;
   }
   if (kind === "barbarian") {
@@ -63,7 +68,7 @@ export function drawBuildingMark(
   const spr = buildingSprite(id);
   if (spr) {
     const width = 0.92 + Math.min(0.28, level * 0.04);
-    plantSprite(ctx, spr, x, y, scale, { width, flip: (yaw & 1) === 1, foot: 0.6 });
+    plantSprite(ctx, spr, x, y, scale, { width, flip: (yaw & 1) === 1, foot: 0.94 });
     return;
   }
   const pal = HOUSE_PAL[id] || CITY_PAL;
@@ -74,7 +79,7 @@ export function drawBuildingMark(
 export function drawBarbarianMark(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number) {
   const spr = settleSprite("barbarian");
   if (spr) {
-    plantSprite(ctx, spr, x, y, scale, { width: 0.9, foot: 0.62 });
+    plantSprite(ctx, spr, x, y, scale, { width: 0.8, foot: 0.94 });
     return;
   }
   const s = scale;

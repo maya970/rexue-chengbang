@@ -204,6 +204,9 @@ export function resolveFight(input: FightInput): FightResult {
   const atkLeft = stripDead([...input.atkPeople, ...input.atkShips], dead);
   const defLeft = stripDead([...input.defPeople, ...input.defShips], dead);
   const win = atkLeft.length > 0 && (defLeft.length === 0 || collapsed === "def") && collapsed !== "atk";
+  const atkIds = new Set([...input.atkPeople, ...input.atkShips].map((c) => c.id));
+  const deadAtk = dead.filter((c) => atkIds.has(c.id));
+  const deadDef = dead.filter((c) => !atkIds.has(c.id));
   const code = input.field ? (win ? "fieldWin" : "fieldLose") : win ? "siegeWin" : "siegeLose";
   const report: BattleReport = {
     id: input.id,
@@ -221,6 +224,8 @@ export function resolveFight(input: FightInput): FightResult {
     rounds,
     deadNames: [...new Set(dead.map((c) => c.name))],
     deadIds: [...new Set(dead.map((c) => c.id))],
+    deadAtkNames: [...new Set(deadAtk.map((c) => c.name))],
+    deadDefNames: [...new Set(deadDef.map((c) => c.name))],
   };
   void atkN0;
   void defN0;

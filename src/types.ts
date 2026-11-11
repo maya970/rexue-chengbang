@@ -284,6 +284,8 @@ export interface BattleReport {
   rounds: BattleRound[];
   deadNames: string[];
   deadIds?: string[];
+  deadAtkNames?: string[];
+  deadDefNames?: string[];
   slaves?: number;
   supplies?: number;
   aftermath?: MarchMission;
