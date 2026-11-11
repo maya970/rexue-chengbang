@@ -5,9 +5,9 @@ import type { City, HamletKind, World } from "../types";
 
 export const BASE_CITY_CAP = 4;
 export const HAMLET_UNLOCK: Record<Exclude<HamletKind, "city">, number> = {
-  village: 2,
-  suburb: 5,
-  urban: 9,
+  village: 4,
+  suburb: 8,
+  urban: 12,
 };
 export const SETTLE_COST = { persons: 2, slaves: 1, supplies: 1 };
 export const SITE_UPGRADE: Record<Exclude<HamletKind, "city" | "urban">, { to: HamletKind; supplies: number; slaves: number }> = {
@@ -87,6 +87,14 @@ export function cityLevelCap(world: World, city: City) {
     return n + HAMLET_UNLOCK[k];
   }, 0);
   return Math.min(16, BASE_CITY_CAP + bonus);
+}
+
+/** 编制与建筑上限都算在所属城邦上。乡村不另开一套军队。 */
+export function seatCity(world: World, city: City): City {
+  if (!isHamlet(city) || !city.parentId) return city;
+  const parent = world.cities[city.parentId];
+  if (!parent || parent.owner !== city.owner) return city;
+  return parent;
 }
 
 export function canFoundVillage(world: World, owner: string, parent: City, x: number, y: number): string | null {

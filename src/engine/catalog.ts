@@ -9,6 +9,8 @@ export const WORLD_SEED = 356;
 export const AR_FEE_ADDR = "B1E8CDbmVVLuYHXiheFXbW4E0F1gpGBhpIWTOi2AFi0";
 export const MARKET_FEE = 0.1;
 export const SUPPLY_PER_SLAVE = 2;
+/** 不花物资/奴隶时的工期倍数。 */
+export const BARE_BUILD_MULT = 4;
 
 export const COLONIZE_COST = { persons: 3, slaves: 2, supplies: 2 };
 export { SETTLE_COST } from "./hamlets";
@@ -80,7 +82,7 @@ export const BUILDINGS: Record<
     needCoast?: boolean;
   }
 > = {
-  acropolis: { name: "卫城", blurb: "可建多座。其他建筑单座等级不能超过最高卫城。各级效果合计。升级工期暴增，多修比硬升划算。", max: 16, baseTime: 48, citizens: 4, recruit: 2, works: 3 },
+  acropolis: { name: "卫城", blurb: "可建多座。其他建筑单座等级不能超过最高卫城。各级效果合计。升级工期暴增。有物资或奴隶则更快，没有也能建。", max: 16, baseTime: 48, citizens: 4, recruit: 2, works: 3 },
   agora: { name: "市政广场", blurb: "可建多座。合计每级缩短建造 2%；每 4 级多允许一座同时在建。升级极慢。", max: 16, baseTime: 36, citizens: 2, recruit: 0, works: 2 },
   oikos: { name: "民居", blurb: "可建多座。合计提供公民卡上限。升级工期暴增。", max: 20, baseTime: 16, citizens: 8, recruit: 0, works: 1 },
   barracks: { name: "兵营", blurb: "可建多座。合计提高重装、轻盾、海军陆战上限。多修比升级划算。", max: 16, baseTime: 28, citizens: 1, recruit: 3, works: 2 },

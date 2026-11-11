@@ -9,12 +9,12 @@ function lineOf(cards: Card[]) {
 import { ROLES } from "./catalog";
 
 function killChance(atkCamp: number, defCamp: number): number {
-  const raw = 0.5 + (atkCamp - defCamp) * 0.035;
-  return Math.min(0.92, Math.max(0.08, raw));
+  const raw = 0.48 + (atkCamp - defCamp) * 0.08;
+  return Math.min(0.96, Math.max(0.06, raw));
 }
 
 function holdLine(avgCamp: number): number {
-  return Math.min(0.9, 0.26 + avgCamp * 0.045);
+  return Math.min(0.94, 0.22 + avgCamp * 0.08);
 }
 
 function addWar(card: Card, war: Campaign) {

@@ -1,5 +1,5 @@
 import { berthOf, byIds, mintCard, slowest, uniqueId } from "./cards";
-import { AR_FEE_ADDR, BUILDINGS, COLONIZE_COST, MISSION_NAME, ROLES, scaleTime, splitWinston, SUPPLY_PER_SLAVE } from "./catalog";
+import { AR_FEE_ADDR, BARE_BUILD_MULT, BUILDINGS, COLONIZE_COST, MISSION_NAME, ROLES, scaleTime, splitWinston, SUPPLY_PER_SLAVE } from "./catalog";
 import { buildSlotsOf, citizensOf, garrisonPeople, garrisonShips, homeOf, recruitCapOf, recruitableCount, roleCapOf, roleCountOf, worksOf } from "./citymath";
 import { resolveFight } from "./combat";
 import { canColonize, canFound, chartOf, CHART, cityIdAt, isWater, npcAt, npcPower, respawnMs, terrainAt } from "./map";
@@ -12,6 +12,7 @@ import {
   cityLevelCap,
   hamletOf,
   isHamlet,
+  seatCity,
   SETTLE_COST,
   SITE_UPGRADE,
 } from "./hamlets";
@@ -72,6 +73,10 @@ function hydrateWorld(world: World): World {
   }
   for (const card of Object.values(world.cards)) {
     card.homeCityId ||= card.cityId;
+    const sit = world.cities[card.homeCityId];
+    if (sit && isHamlet(sit) && sit.parentId && world.cities[sit.parentId]) {
+      card.homeCityId = sit.parentId;
+    }
   }
   return world;
 }
@@ -1229,7 +1234,7 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     if (next > cap) {
       return skip(world, cmd, isHamlet(city)
         ? "附属聚落请用「升级为郊区/城区」"
-        : `单座等级上限 ${cap}。空地不够时，围绕城市一圈圈修建乡村：乡村自带空地，相连后还提高本城单座上限`);
+        : `单座等级上限 ${cap}。相连乡村给主城每座建筑加上限，须在主城升级才能用，不会直接加等级`);
     }
     const cost = slaveCostFor(next);
     const need = workersFor(next);
@@ -1240,7 +1245,7 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     if (workers.some((c) => c.owner !== owner || c.cityId !== city.id || c.marchId || c.jobId || c.listedWinston)) {
       return skip(world, cmd, "监工人选已被占用");
     }
-    if (!consumeMaterials(world, city.id, cost)) return skip(world, cmd, `建造需要 ${cost} 张物资或奴隶折算`);
+    const paid = consumeMaterials(world, city.id, cost);
     if (isNew) {
       plot.building = bid;
       plot.level = 0;
@@ -1248,8 +1253,9 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
     const jobId = uniqueId([batchKey, cmd.id, "job"]);
     lockWorkers(world, workers, jobId);
     const agoraCut = Math.min(0.5, (city.buildings.agora?.level || 0) * 0.02);
-    const time = scaleTime(def.baseTime, next, (1 - agoraCut) * plotTimeMult(city, bid, plot) * ownerScale(world, owner)) * 1000;
-    plot.job = { to: next, finishAt: t + time, workerIds: workers.map((c) => c.id), material: cost };
+    const bare = paid ? 1 : BARE_BUILD_MULT;
+    const time = scaleTime(def.baseTime, next, (1 - agoraCut) * plotTimeMult(city, bid, plot) * ownerScale(world, owner) * bare) * 1000;
+    plot.job = { to: next, finishAt: t + time, workerIds: workers.map((c) => c.id), material: paid ? cost : 0 };
     rebuildBuildings(city);
     return;
   }
@@ -1272,22 +1278,27 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
 
   if (cmd.kind === "recruit") {
     if (!city || city.owner !== owner) return skip(world, cmd, "城邦不属于你");
+    const home = seatCity(world, city);
     const role = cmd.role!;
     const def = ROLES[role];
     if (role === "slave" || role === "supply") return skip(world, cmd, "奴隶不能招募，物资不能招募");
     if (role === "citizen") return skip(world, cmd, "公民只能由本城奴隶转正");
-    if (def.building && (city.buildings[def.building]?.level || 0) < 1) return skip(world, cmd, `需要 ${BUILDINGS[def.building].name}`);
-    if (def.needCoast && !isWater(terrainAt(city.x, city.y))) return skip(world, cmd, "舰只与舰长要在海岸或海域城招募");
+    if (def.building && (home.buildings[def.building]?.level || 0) < 1) {
+      return skip(world, cmd, `需要所属城的${BUILDINGS[def.building].name}（乡村只提高主城可升等级，不另开编制）`);
+    }
+    if (def.needCoast && !isWater(terrainAt(home.x, home.y)) && !isWater(terrainAt(city.x, city.y))) {
+      return skip(world, cmd, "舰只与舰长要在海岸或海域城招募");
+    }
     const want = Math.max(1, Math.min(40, Math.floor(cmd.count || 1)));
     let made = 0;
     for (let i = 0; i < want; i += 1) {
-      if (def.kind !== "ship" && recruitableCount(world, city.id) >= recruitCapOf(city)) {
-        if (!made) return skip(world, cmd, "招募上限已满，上限只由建筑物决定");
+      if (def.kind !== "ship" && recruitableCount(world, home.id) >= recruitCapOf(home)) {
+        if (!made) return skip(world, cmd, "所属城招募上限已满，请在主城升级对应建筑");
         break;
       }
-      const roleCap = roleCapOf(city, role);
-      if (def.capPerLevel && roleCountOf(world, city.id, role) >= roleCap) {
-        if (!made) return skip(world, cmd, `${def.name} 已满：${BUILDINGS[def.building!].name} ${city.buildings[def.building!]?.level || 0} 级上限 ${roleCap}`);
+      const roleCap = roleCapOf(home, role);
+      if (def.capPerLevel && roleCountOf(world, home.id, role) >= roleCap) {
+        if (!made) return skip(world, cmd, `${def.name} 已满：主城${BUILDINGS[def.building!].name} ${home.buildings[def.building!]?.level || 0} 级上限 ${roleCap}`);
         break;
       }
       const id = uniqueId([batchKey, cmd.id, role, owner, String(i)]);
@@ -1297,6 +1308,7 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
         role,
         owner,
         cityId: city.id,
+        homeCityId: home.id,
         bornAt: t,
         bornTx: entropy,
       });
@@ -1458,16 +1470,18 @@ function applyCommand(world: World, cmd: Command, owner: string, t: number, batc
 
   if (cmd.kind === "enfranchise") {
     if (!city || city.owner !== owner) return skip(world, cmd, "城邦不属于你");
+    const home = seatCity(world, city);
     const slave = world.cards[cmd.cardId || ""];
     if (!slave || slave.kind !== "slave" || slave.owner !== owner || slave.cityId !== city.id || slave.marchId || slave.jobId) {
       return skip(world, cmd, "本城没有这张空闲奴隶卡");
     }
-    if (recruitableCount(world, city.id) >= recruitCapOf(city)) return skip(world, cmd, "招募上限已满");
-    if (roleCountOf(world, city.id, "citizen") >= roleCapOf(city, "citizen")) {
-      return skip(world, cmd, `公民已满：民居 ${city.buildings.oikos?.level || 0} 级上限 ${roleCapOf(city, "citizen")}`);
+    if (recruitableCount(world, home.id) >= recruitCapOf(home)) return skip(world, cmd, "所属城招募上限已满");
+    if (roleCountOf(world, home.id, "citizen") >= roleCapOf(home, "citizen")) {
+      return skip(world, cmd, `公民已满：主城民居 ${home.buildings.oikos?.level || 0} 级上限 ${roleCapOf(home, "citizen")}`);
     }
     slave.kind = "person";
     slave.role = "citizen";
+    slave.homeCityId = home.id;
     slave.name = slave.name.replace(/^奴隶·/, "公民·");
     return;
   }
@@ -1670,5 +1684,6 @@ export function playerCities(world: World, owner: string): City[] {
 }
 
 export { buildSlotsOf, citizensOf, homeOf, recruitCapOf, roleCapOf, roleCountOf, worksOf, garrisonPeople, garrisonShips, MISSION_NAME };
+export { seatCity } from "./hamlets";
 export { idleSupply, idleSlaves, idleWorkers, corridorBlocked };
 export { claimsGap, isClaimed, adjacentClaimed, alliesOf } from "./realm";

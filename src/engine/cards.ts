@@ -8,6 +8,7 @@ export function mintCard(input: {
   role: RoleId;
   owner: string;
   cityId: string;
+  homeCityId?: string;
   bornAt: number;
   bornTx: string;
 }): Card {
@@ -28,7 +29,7 @@ export function mintCard(input: {
     name,
     owner: input.owner,
     cityId: input.cityId,
-    homeCityId: input.cityId,
+    homeCityId: input.homeCityId || input.cityId,
     bornAt: input.bornAt,
     bornTx: input.bornTx,
     campaigns: [],

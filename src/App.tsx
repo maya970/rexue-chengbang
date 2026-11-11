@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BUILDINGS, COLONIZE_COST, MISSION_NAME, PLOT_NAME, PLOT_TIME, ROLES, scaleTime, SUPPLY_PER_SLAVE } from "./engine/catalog";
-import { canFoundVillage, childrenOf, cityLevelCap, hamletLabel, hamletOf, inCityRealm, isHamlet, linkedChildrenOf, SITE_UPGRADE } from "./engine/hamlets";
+import { BARE_BUILD_MULT, BUILDINGS, COLONIZE_COST, MISSION_NAME, PLOT_NAME, PLOT_TIME, ROLES, scaleTime, SUPPLY_PER_SLAVE } from "./engine/catalog";
+import { canFoundVillage, childrenOf, cityLevelCap, hamletLabel, hamletOf, inCityRealm, isHamlet, linkedChildrenOf, seatCity, SITE_UPGRADE } from "./engine/hamlets";
 import { canColonize, chartName, chartOf, cityIdAt, npcAt, terrainAt, tileName } from "./engine/map";
 import { planPath } from "./engine/path";
 import { canBuildOn, plotTimeMult } from "./engine/plots";
@@ -112,7 +112,8 @@ export function App() {
   const myGuildId = g.address ? sim.memberOf?.[g.address] : "";
   const myGuild = myGuildId ? sim.guilds?.[myGuildId] : undefined;
   const focusPlot = city?.plots?.find((p) => p.id === plotId);
-  const peopleN = city && mine ? Object.values(sim.cards).filter((c) => homeOf(c) === city.id && c.kind === "person" && !sim.fallen?.[c.id]).length : 0;
+  const seat = city ? seatCity(sim, city) : undefined;
+  const peopleN = seat && mine ? Object.values(sim.cards).filter((c) => homeOf(c) === seat.id && c.kind === "person" && !sim.fallen?.[c.id]).length : 0;
   const slaveN = slaves.length;
   const timeFactor = empireTimeFactor(
     g.myCities.length,
@@ -624,20 +625,20 @@ export function App() {
                   }}>改名</button>
                 </div>
                 <p className="muted">改名写入指令队列，点底部「执行指令」后生效。限 16 字。</p>
-                <p>公民 {citizensOf(city, sim)} · 军队编制 {peopleN}/{recruitCapOf(city)}（出征、驻村仍占名额） · 成果 {worksOf(city, sim)} · 本城奴隶 {slaveN} · 物资 {goods.length}</p>
+                <p>公民 {citizensOf(seat || city, sim)} · 军队编制 {peopleN}/{recruitCapOf(seat || city)}（出征、驻村仍占所属城名额） · 成果 {worksOf(city, sim)} · 本城奴隶 {slaveN} · 物资 {goods.length}</p>
                 {isHamlet(city) ? (
                   <p className="muted">
                     附属 {sim.cities[city.parentId || ""]?.name || "城邦"}。
                     {city.parentId && sim.cities[city.parentId] && !inCityRealm(sim, sim.cities[city.parentId], city)
-                      ? "未与该城城域相连，不提供等级上限。"
-                      : "与城域相连，为所属城解锁等级上限。"}
+                      ? "未与该城城域相连，不给主城加建筑上限。"
+                      : "与城域相连：给主城每一座建筑提高可升等级，须在主城升级，不会直接加等级或编制。"}
                     {hamletOf(city) !== "urban"
                       ? `升格为${hamletLabel(SITE_UPGRADE[hamletOf(city) as "village" | "suburb"].to)}：物资 ${SITE_UPGRADE[hamletOf(city) as "village" | "suburb"].supplies}、奴隶 ${SITE_UPGRADE[hamletOf(city) as "village" | "suburb"].slaves}。`
                       : "已是城区，解锁最多。"}
                   </p>
                 ) : (
                   <p className="muted">
-                    单座建筑等级上限 {cityLevelCap(sim, city)}（基础 4 + 城域相连的乡村）。同种可多修，受空地限制；升级极慢。
+                    主城每座建筑可升至 {cityLevelCap(sim, city)} 级（基础 4 + 相连乡村：村+4 / 郊+8 / 城+12）。乡村加的是上限，要在主城升级才生效。同种可多修；无物资也能建，有料工期短。
                     相连 {linkedChildrenOf(sim, city).length} 处
                     {childrenOf(sim, city.id).length > linkedChildrenOf(sim, city).length
                       ? `，另有 ${childrenOf(sim, city.id).length - linkedChildrenOf(sim, city).length} 处未相连不计上限`
@@ -709,6 +710,7 @@ export function App() {
                   const cost = slaveCostFor(next);
                   const workers = workersFor(next);
                   const sec = scaleTime(def.baseTime, next, plotTimeMult(city, bid, focusPlot) * timeFactor);
+                  const haveMat = idleSupply(sim, city.id).length + idleSlaves(sim, city.id).length >= cost;
                   const upgrading = Boolean(here && here.building);
                   return (
                     <div className="bld" key={bid}>
@@ -716,7 +718,7 @@ export function App() {
                         {def.name}
                         {n ? ` · ${n}座合计${sum}级` : ""}
                         {here ? ` · 此座${lv}级` : ""}
-                        {" · "}料{cost} · 监工{workers} · 约{sec}秒
+                        {" · "}监工{workers} · {haveMat ? `耗料${cost}约${sec}秒` : `无料约${sec * BARE_BUILD_MULT}秒（有料约${sec}秒）`}
                         <div className={job ? "build-eta-line" : "muted"}>
                           {def.blurb}
                           {job ? ` · 在建至${job.to}级，剩余 ${remain(job.finishAt, g.now)}` : ""}
@@ -725,7 +727,7 @@ export function App() {
                       <button className="btn tiny" disabled={busyBuild || !focusPlot || Boolean(job)} onClick={() => {
                         g.addCommand(makeCommand({
                           kind: "upgrade",
-                          label: `${upgrading ? "升级" : "修建"} ${def.name}（料${cost}/监工${workers}）`,
+                          label: `${upgrading ? "升级" : "修建"} ${def.name}（监工${workers}${haveMat ? `/料${cost}` : "/无料慢工"}）`,
                           cityId: city.id,
                           building: bid,
                           plotId: focusPlot?.id,
@@ -740,8 +742,8 @@ export function App() {
 
             {modal === "recruit" && city && mine ? (
               <>
-                <h3>招募 总上限 {recruitCapOf(city)} · 已有编制 {peopleN}</h3>
-                <p className="muted">编制含出征与驻外（乡村）的人，出征不会空出名额再招。奴隶不能招募。用 {SUPPLY_PER_SLAVE} 张本城物资买一张奴隶，或把奴隶转成公民。每种兵由对应建筑合计等级决定上限。</p>
+                <h3>招募 总上限 {recruitCapOf(seat || city)} · 已有编制 {peopleN}</h3>
+                <p className="muted">编制算在所属城邦。乡村不另开军队，只给主城建筑加可升等级。出征、驻村仍占主城名额。奴隶不能招募。用 {SUPPLY_PER_SLAVE} 张物资买奴隶，或把奴隶转成公民。兵种上限看主城对应建筑合计等级。</p>
                 <button className="btn" onClick={() => {
                   g.addCommand(makeCommand({ kind: "buy_slave", label: `买奴隶（耗物资${SUPPLY_PER_SLAVE}）`, cityId: city.id }));
                   setModal("none");
