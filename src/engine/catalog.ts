@@ -86,7 +86,7 @@ export const BUILDINGS: Record<
   barracks: { name: "兵营", blurb: "专属：重装步兵、轻盾兵、海军陆战的人数上限。", max: 16, baseTime: 28, citizens: 1, recruit: 3, works: 2 },
   stables: { name: "马厩", blurb: "专属：骑兵人数上限。", max: 16, baseTime: 32, citizens: 1, recruit: 2, works: 2 },
   range: { name: "弓营", blurb: "专属：弓手人数上限。弓手站第二排放箭，但更脆弱。", max: 16, baseTime: 28, citizens: 1, recruit: 2, works: 2 },
-  wall: { name: "城墙", blurb: "专属：守城时增加地形宽度，让更多人同时出手。", max: 16, baseTime: 30, citizens: 0, recruit: 0, works: 2 },
+  wall: { name: "城墙", blurb: "专属：守城时只增加守方宽度，攻方仍按地形宽度出手。", max: 16, baseTime: 30, citizens: 0, recruit: 0, works: 2 },
   temple: { name: "神庙", blurb: "专属：守军更难崩溃；本城战役成果按神庙等级加倍铭记。", max: 12, baseTime: 34, citizens: 1, recruit: 0, works: 2 },
   shipyard: { name: "造船厂", blurb: "专属：招募舰长、三列桨座、运输船。海岸或海域城才能建。", max: 16, baseTime: 40, citizens: 1, recruit: 2, works: 2, needCoast: true },
   harbor: { name: "海港", blurb: "专属：没有港口不能出海；等级加快海路行军。海岸或海域城才能建。", max: 12, baseTime: 32, citizens: 2, recruit: 0, works: 2, needCoast: true },

@@ -454,10 +454,11 @@ function fightMarch(world: World, march: March, t: number, dest: City | undefine
     defPeople = garrisonPeople(world, dest.id);
     defShips = garrisonShips(world, dest.id);
     defender = dest.owner;
-    frontage = dest.frontage + Math.floor((dest.buildings.wall?.level || 0) / 3);
+    frontage = dest.frontage;
   }
   const pos = field ? posAt(march.path, march.startAt, march.arriveAt, t) : { x: march.toX, y: march.toY };
   const temple = dest && !field ? (dest.buildings.temple?.level || 0) : 0;
+  const wallBonus = dest && !field ? Math.floor((dest.buildings.wall?.level || 0) / 3) : 0;
   const fight = resolveFight({
     id: field ? `field:${clashKey(march.id, foe?.id || "x", `${pos.x},${pos.y}`)}` : `btl:${march.id}`,
     entropy: march.entropy,
@@ -471,6 +472,7 @@ function fightMarch(world: World, march: March, t: number, dest: City | undefine
     atkShips,
     defShips,
     frontage,
+    defFrontage: frontage + wallBonus,
     naval: march.naval || Boolean(foe?.naval),
     field,
     warName: field ? "野外遭遇" : MISSION_NAME[march.mission],

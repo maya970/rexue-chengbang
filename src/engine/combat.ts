@@ -34,6 +34,8 @@ export interface FightInput {
   atkShips: Card[];
   defShips: Card[];
   frontage: number;
+  /** Defender line width. Walls add here only; attacker keeps terrain frontage. */
+  defFrontage?: number;
   naval: boolean;
   field: boolean;
   warName: string;
@@ -132,25 +134,28 @@ export function resolveFight(input: FightInput): FightResult {
   const atkN0 = atk.length + atkShips.length;
   const defN0 = def.length + defShips.length;
   let collapsed: "atk" | "def" | undefined;
-  const width = Math.max(1, input.frontage);
+  const atkWidth = Math.max(1, input.frontage);
+  const defWidth = Math.max(1, input.defFrontage ?? input.frontage);
   const defHold = Math.max(0, input.defHold || 0);
   let atkTurn = bits.bit() === 1;
   rounds.push(round("first", {
     side: atkTurn ? "atk" : "def",
-    width,
+    width: atkWidth,
+    atkWidth,
+    defWidth,
     atk: lineOf(atk),
     atkShips: lineOf(atkShips),
     def: lineOf(def),
     defShips: lineOf(defShips),
     temple: defHold ? defHold.toFixed(2) : "",
-  }, "先手", `用交易熵的第 1 位随机数判定先手：${atkTurn ? "攻方" : "守方"}先手。地形最高宽度 ${width}。攻 ${lineOf(atk)} / 舰 ${lineOf(atkShips)}；守 ${lineOf(def)} / 舰 ${lineOf(defShips)}。士气取在场平均值，战役越多越难崩溃${defHold ? `。神庙使守军士气 +${defHold.toFixed(2)}` : ""}。`));
+  }, "先手", `用交易熵的第 1 位随机数判定先手：${atkTurn ? "攻方" : "守方"}先手。攻方宽度 ${atkWidth}，守方宽度 ${defWidth}。攻 ${lineOf(atk)} / 舰 ${lineOf(atkShips)}；守 ${lineOf(def)} / 舰 ${lineOf(defShips)}。士气取在场平均值，战役越多越难崩溃${defHold ? `。神庙使守军士气 +${defHold.toFixed(2)}` : ""}。`));
 
   if (input.naval) {
     let r = 0;
     while (atkShips.length && defShips.length && r < 40) {
       r += 1;
-      if (atkTurn) volley(atkShips, defShips, width, bits, dead, rounds, "seaAtk", r);
-      else volley(defShips, atkShips, width, bits, dead, rounds, "seaDef", r);
+      if (atkTurn) volley(atkShips, defShips, atkWidth, bits, dead, rounds, "seaAtk", r);
+      else volley(defShips, atkShips, defWidth, bits, dead, rounds, "seaDef", r);
       atkShips = stripDead(atkShips, dead);
       defShips = stripDead(defShips, dead);
       if (moraleBroke(input.atkShips.length, atkShips, bits, 0)) {
@@ -181,8 +186,8 @@ export function resolveFight(input: FightInput): FightResult {
     let r = 0;
     while (atk.length && def.length && r < 50) {
       r += 1;
-      if (atkTurn) volley(atk, def, width, bits, dead, rounds, "landAtk", r);
-      else volley(def, atk, width, bits, dead, rounds, "landDef", r);
+      if (atkTurn) volley(atk, def, atkWidth, bits, dead, rounds, "landAtk", r);
+      else volley(def, atk, defWidth, bits, dead, rounds, "landDef", r);
       atk = stripDead(atk, dead);
       def = stripDead(def, dead);
       if (moraleBroke(input.atkPeople.length, atk, bits, 0)) {
