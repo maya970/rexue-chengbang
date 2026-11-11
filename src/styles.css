@@ -600,52 +600,65 @@ input[type="text"], input[type="number"] {
     margin-top: 8px;
   }
   .map-tools, .chart-pad { display: none; }
-  .modal-back {
-    align-items: stretch;
-    justify-content: stretch;
+  .dock-hint { display: none; }
+  .atlas-label { display: none; }
+  .stage-fill {
+    position: absolute;
+    inset: 0;
+    z-index: 7;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     background: #0c0a09;
+  }
+  .stage-fill .atlas-wrap,
+  .stage-fill .atlas-host,
+  .stage-fill .canvas-host {
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+  }
+  .stage-mail {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+    overflow: hidden;
+  }
+  .stage-mail .board-body { flex: 1; min-height: 0; overflow: auto; }
+  .stage-mail > h3,
+  .stage-mail > .muted,
+  .stage-mail .help-lang-row { display: none; }
+  .mail-row {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    color: inherit;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 12px 4px;
+    font-size: 15px;
+  }
+  .mail-row span { margin-right: 10px; }
+  .mail-row.on { background: rgba(182, 134, 61, 0.12); }
+  .mail-body { margin-top: 8px; font-size: 13px; line-height: 1.5; }
+  .mail-body p { margin: 0 0 6px; }
+  .modal-back {
+    align-items: flex-end;
+    background: rgba(0, 0, 0, 0.4);
   }
   .modal, .modal.board {
     width: 100%;
     max-width: none;
-    height: 100%;
-    max-height: none;
-    border-radius: 0;
-    border: 0;
-    padding: calc(12px + env(safe-area-inset-top)) 14px calc(16px + env(safe-area-inset-bottom));
-    display: flex;
-    flex-direction: column;
+    height: auto;
+    max-height: min(72vh, 560px);
+    border-radius: 14px 14px 0 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    padding: 14px 14px calc(16px + env(safe-area-inset-bottom));
   }
   .modal { overflow: auto; }
-  .modal.board { overflow: hidden; }
-  .modal-x {
-    position: sticky;
-    top: 0;
-    z-index: 3;
-    align-self: flex-end;
-  }
-  .modal.board .board-body,
-  .modal.board .board-atlas {
-    flex: 1;
-    min-height: 0;
-  }
-  .board-atlas {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-  .board-atlas-list {
-    flex-direction: row;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    max-height: none;
-    padding-bottom: 6px;
-  }
-  .board-atlas-list .btn { flex: 0 0 auto; white-space: nowrap; }
-  .board-atlas .atlas-wrap {
-    min-height: 0;
-    height: 100%;
-  }
-  .atlas-label { font-size: 11px; line-height: 1.35; }
   input[type="text"], input[type="number"], .board-search, .lang-select select {
     font-size: 16px;
   }

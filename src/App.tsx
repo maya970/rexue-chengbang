@@ -16,6 +16,7 @@ import { useGame } from "./hooks/useGame";
 import { makeCommand, statusLabel } from "./lib/cmd";
 import { shortAddr } from "./lib/wallet";
 import { sendCam } from "./lib/cam";
+import { usePhone } from "./lib/phone";
 import { AtlasCanvas } from "./scene/AtlasCanvas";
 import { CityCanvas } from "./scene/CityCanvas";
 import { EmpireHud } from "./scene/EmpireHud";
@@ -33,6 +34,7 @@ type Modal = "none" | "tile" | "city" | "recruit" | "squad" | "build" | "card" |
 type RosterTab = "cities" | "people" | "slaves" | "goods" | "marches";
 type BoardCat = "all" | "win" | "lose" | "scout" | "colonize" | "fight" | "reinforce" | "mine" | "join" | "big";
 type DrawerId = "none" | "menu" | "stock" | "roster" | "queue" | "view";
+type Layer = "play" | "atlas" | "mail" | "guild" | "help";
 
 function hay(parts: (string | number | undefined)[]) {
   return parts.filter((x) => x !== undefined).join(" ").toLowerCase();
@@ -40,7 +42,11 @@ function hay(parts: (string | number | undefined)[]) {
 
 export function App() {
   const { t, locale } = useI18n();
+  const phone = usePhone();
   const g = useGame();
+  useEffect(() => {
+    if (!phone) setLayer("play");
+  }, [phone]);
   const fileRef = useRef<HTMLInputElement>(null);
   const [modal, setModal] = useState<Modal>("none");
   const [inside, setInside] = useState(false);
@@ -55,6 +61,8 @@ export function App() {
   const [rosterOpen, setRosterOpen] = useState(false);
   const [stockOpen, setStockOpen] = useState(false);
   const [drawer, setDrawer] = useState<DrawerId>("none");
+  const [layer, setLayer] = useState<Layer>("play");
+  const [openMail, setOpenMail] = useState<string | null>(null);
 
   function toggleDrawer(id: Exclude<DrawerId, "none">) {
     const next = drawer === id ? "none" : id;
@@ -181,6 +189,12 @@ export function App() {
     setBoardQ("");
     setBoardCat("all");
     closeDrawers();
+    if (phone) {
+      setOpenMail(null);
+      setLayer("mail");
+      setModal("none");
+      return;
+    }
     setModal("reports");
   }
 
@@ -188,7 +202,18 @@ export function App() {
     setBoardQ("");
     setBoardCat("all");
     closeDrawers();
+    if (phone) {
+      setLayer(kind === "atlas" ? "atlas" : kind);
+      setInside(false);
+      setModal("none");
+      return;
+    }
     setModal(kind);
+  }
+
+  function backToMap() {
+    setLayer("play");
+    closeDrawers();
   }
 
   const boardModal = modal === "reports" || modal === "guild" || modal === "atlas" || modal === "help";
@@ -272,6 +297,7 @@ export function App() {
     g.enterChart(ch.cx, ch.cy, { x: c.x, y: c.y });
     setInside(enter && Boolean(sim.cities[id]));
     setModal("none");
+    setLayer("play");
     closeDrawers();
   }
 
@@ -286,6 +312,7 @@ export function App() {
     }
     setCardId(card.id);
     setInside(false);
+    setLayer("play");
     setModal("card");
     closeDrawers();
   }
@@ -301,14 +328,15 @@ export function App() {
     g.setSelected({ x: c.x, y: c.y });
     setInside(true);
     setModal("none");
+    setLayer("play");
   }
 
-  if (g.booting || !g.address) {
+  if (phone && (g.booting || !g.address)) {
     return <Gate booting={g.booting} error={g.error} onCreate={g.create} onImport={g.doImport} />;
   }
 
   return (
-    <div className={`app app-3d${drawer !== "none" ? ` drawer-${drawer}` : ""}`}>
+    <div className={`app app-3d${drawer !== "none" ? ` drawer-${drawer}` : ""}${phone ? " app-phone" : ""}${layer !== "play" ? ` layer-${layer}` : ""}`}>
       <header className="top">
         <div className="drawer-tabs drawer-tabs-top" role="tablist">
           <button type="button" className={drawer === "menu" ? "on" : ""} onClick={() => toggleDrawer("menu")}>
@@ -316,7 +344,7 @@ export function App() {
           </button>
           <button type="button" className={drawer === "stock" ? "on" : ""} onClick={() => toggleDrawer("stock")}>库藏</button>
           <button type="button" className={drawer === "roster" ? "on" : ""} onClick={() => toggleDrawer("roster")}>名册</button>
-          <button type="button" className="drawer-fold" onClick={closeDrawers} disabled={drawer === "none"}>收起</button>
+          <button type="button" className="drawer-fold" onClick={closeDrawers} disabled={drawer === "none"}>{phone ? "收" : "收起"}</button>
         </div>
         <div className="chrome-body">
         <nav className="top-nav">
@@ -326,28 +354,28 @@ export function App() {
             </button>
           ) : null}
           <button className="btn tiny" onClick={openReports}>
-            {t("reports")}{unreadReports.length ? ` ${unreadReports.length}` : ""}
+            {phone ? "战报" : t("reports")}{unreadReports.length ? ` ${unreadReports.length}` : ""}
           </button>
-          <button className="btn tiny" onClick={() => openBoard("guild")}>{t("guild")}</button>
-          <button className="btn tiny" onClick={() => openBoard("atlas")}>{t("atlas")}</button>
-          <button className="btn tiny" onClick={() => openBoard("help")}>{t("help")}</button>
-          <LangSelect compact />
+          <button className="btn tiny" onClick={() => openBoard("guild")}>{phone ? "公会" : t("guild")}</button>
+          <button className="btn tiny" onClick={() => openBoard("atlas")}>{phone ? "总览" : t("atlas")}</button>
+          <button className="btn tiny" onClick={() => openBoard("help")}>{phone ? "帮助" : t("help")}</button>
+          {phone ? null : <LangSelect compact />}
           <button className="btn tiny primary desk-dup" onClick={() => toggleDrawer("roster")}>
             {rosterOpen ? "收起名册" : "我的名册"}
           </button>
           {(g.myCities[0] || rosterCities[0]) && !inside ? (
-            <button className="btn tiny" onClick={() => jumpCity((g.myCities[0] || rosterCities[0]).id)}>一键回城</button>
+            <button className="btn tiny" onClick={() => jumpCity((g.myCities[0] || rosterCities[0]).id)}>{phone ? "回城" : "一键回城"}</button>
           ) : null}
-          {mine && !inside ? <button className="btn tiny" onClick={() => { setInside(true); setModal("none"); }}>进入城市</button> : null}
-          {inside ? <button className="btn tiny" onClick={() => setInside(false)}>回到大地图</button> : null}
+          {mine && !inside ? <button className="btn tiny" onClick={() => { setInside(true); setModal("none"); setLayer("play"); }}>{phone ? "进城" : "进入城市"}</button> : null}
+          {inside ? <button className="btn tiny" onClick={() => setInside(false)}>{phone ? "出城" : "回到大地图"}</button> : null}
           {inside && mine ? (
             <>
-              <button className="btn tiny" onClick={() => setModal("city")}>城邦 / 改名</button>
-              <button className="btn tiny primary" onClick={() => setModal("recruit")}>招募人物卡</button>
+              <button className="btn tiny" onClick={() => setModal("city")}>城邦</button>
+              <button className="btn tiny primary" onClick={() => setModal("recruit")}>招募</button>
               <button className="btn tiny" onClick={() => { setPlotId(""); setModal("build"); }}>建造</button>
             </>
           ) : null}
-          {incoming.length ? <span className="err">敌军逼近 {incoming.length} 支</span> : null}
+          {incoming.length ? <span className="err">敌 {incoming.length}</span> : null}
         </nav>
         {g.busy ? <span className="busy">{g.busy}</span> : null}
         {g.error ? <span className="err">{g.error}</span> : null}
@@ -361,13 +389,13 @@ export function App() {
           {g.address ? (
             <>
               <span className="muted">{shortAddr(g.address)}</span>
-              <button className="btn" onClick={g.doExport}>导出钱包</button>
+              <button className="btn" onClick={g.doExport}>{phone ? "导出" : "导出钱包"}</button>
               <button className="btn" onClick={g.logout}>退出</button>
             </>
           ) : (
             <>
-              <button className="btn primary" onClick={g.create}>游戏内创建钱包</button>
-              <button className="btn" onClick={() => fileRef.current?.click()}>导入钱包</button>
+              <button className="btn primary" onClick={g.create}>{phone ? "创建" : "游戏内创建钱包"}</button>
+              <button className="btn" onClick={() => fileRef.current?.click()}>{phone ? "导入" : "导入钱包"}</button>
             </>
           )}
         </div>
@@ -375,9 +403,9 @@ export function App() {
       </header>
 
       <div className="stage">
-        {g.loadingWorld && !g.worldReady ? (
+        {phone && g.loadingWorld && !g.worldReady ? (
           <div className="boot-veil">
-            <p>正在载入天下…</p>
+            <p>载入…</p>
             {g.error ? (
               <>
                 <p className="err">{g.error}</p>
@@ -387,7 +415,7 @@ export function App() {
           </div>
         ) : null}
         {drawer !== "none" ? <button type="button" className="drawer-scrim" aria-label="收起" onClick={closeDrawers} /> : null}
-        {g.address && stockOpen ? (
+        {g.address && stockOpen && layer === "play" ? (
           <EmpireHud
             address={g.address}
             city={mine ? city : undefined}
@@ -397,7 +425,70 @@ export function App() {
             onOpenCity={() => { if (city && mine) setModal("city"); }}
           />
         ) : null}
-        {inside && city && mine ? (
+        {layer === "atlas" ? (
+          <div className="stage-fill">
+            <AtlasCanvas
+              chart={g.chart}
+              cities={rosterCities.map((c) => ({ x: c.x, y: c.y, mine: true }))}
+              onEnter={(cx, cy) => { g.enterChart(cx, cy); setInside(false); setLayer("play"); }}
+            />
+          </div>
+        ) : layer === "mail" ? (
+          <div className="stage-fill stage-mail">
+            <div className="board-cats">
+              {([["all", "全"], ["win", "胜"], ["lose", "负"], ["fight", "战"], ["scout", "侦"], ["colonize", "殖"], ["reinforce", "援"]] as [BoardCat, string][]).map(([id, label]) => (
+                <button key={id} className={`btn tiny${boardCat === id ? " primary" : ""}`} onClick={() => setBoardCat(id)}>{label}</button>
+              ))}
+            </div>
+            <div className="board-body">
+              {filteredReports.length ? filteredReports.map((r) => {
+                const mail = formatReport(locale, r, g.address);
+                const open = openMail === r.id;
+                return (
+                  <button type="button" key={r.id} className={`mail-row${open ? " on" : ""}`} onClick={() => setOpenMail(open ? null : r.id)}>
+                    <span>{mail.badge}</span>
+                    <span>({r.x},{r.y})</span>
+                    {open ? (
+                      <div className="mail-body">
+                        {mail.rounds.map((round, i) => <p key={i}>{round.text}</p>)}
+                        {mail.loot ? <p>{mail.loot}</p> : null}
+                        {mail.dead ? <p className="err">{mail.dead}</p> : null}
+                      </div>
+                    ) : null}
+                  </button>
+                );
+              }) : <p className="muted">无</p>}
+            </div>
+          </div>
+        ) : layer === "guild" ? (
+          <div className="stage-fill stage-mail">
+            {myGuild ? (
+              <div className="card">
+                <div>{myGuild.name}<small>{myGuild.members.length}</small></div>
+                <button className="btn tiny" onClick={() => { g.addCommand(makeCommand({ kind: "leave_guild", label: `退出公会 ${myGuild.name}` })); setLayer("play"); }}>退</button>
+              </div>
+            ) : (
+              <div className="row">
+                <input value={guildName} onChange={(e) => setGuildName(e.target.value)} placeholder="公会名" />
+                <button className="btn primary" onClick={() => { g.addCommand(makeCommand({ kind: "create_guild", label: `建立公会 ${guildName}`, name: guildName })); setLayer("play"); }}>建</button>
+              </div>
+            )}
+            <div className="board-body">
+              {filteredGuilds.map((guild) => (
+                <div className="card" key={guild.id}>
+                  <div>{guild.name}<small>{guild.members.length}</small></div>
+                  {guild.id === myGuildId ? null : (
+                    <button className="btn tiny" onClick={() => { g.addCommand(makeCommand({ kind: "join_guild", label: `加入 ${guild.name}`, guildId: guild.id })); setLayer("play"); }}>入</button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : layer === "help" ? (
+          <div className="stage-fill stage-mail">
+            <HelpBoard q={boardQ} onQ={setBoardQ} />
+          </div>
+        ) : inside && city && mine ? (
           <CityCanvas
             city={city}
             world={g.world}
@@ -432,17 +523,17 @@ export function App() {
       {rosterOpen ? (
           <aside className="map-menu">
             <div className="map-menu-head">
-              <b>我的名册</b>
-              <span className="muted">点一项才跳转，不铺在地图上</span>
-              <button className="btn tiny" style={{ marginLeft: "auto" }} onClick={closeDrawers}>关闭</button>
+              <b>{phone ? "名册" : "我的名册"}</b>
+              {phone ? null : <span className="muted">点一项才跳转，不铺在地图上</span>}
+              <button className="btn tiny" style={{ marginLeft: "auto" }} onClick={closeDrawers}>{phone ? "收" : "关闭"}</button>
             </div>
             <div className="map-menu-tabs">
               {([
-                ["cities", `城邦 ${rosterCities.length}`],
-                ["people", `人物 ${myCards.filter((c) => c.kind === "person").length}`],
-                ["slaves", `奴隶 ${myCards.filter((c) => c.kind === "slave").length}`],
-                ["goods", `物资 ${myCards.filter((c) => c.kind === "supply").length}`],
-                ["marches", `行军 ${myMarches.length}`],
+                ["cities", `${phone ? "城" : "城邦"} ${rosterCities.length}`],
+                ["people", `${phone ? "人" : "人物"} ${myCards.filter((c) => c.kind === "person").length}`],
+                ["slaves", `${phone ? "奴" : "奴隶"} ${myCards.filter((c) => c.kind === "slave").length}`],
+                ["goods", `${phone ? "资" : "物资"} ${myCards.filter((c) => c.kind === "supply").length}`],
+                ["marches", `${phone ? "军" : "行军"} ${myMarches.length}`],
               ] as [RosterTab, string][]).map(([id, label]) => (
                 <button key={id} className={rosterTab === id ? "on" : ""} onClick={() => setRosterTab(id)}>{label}</button>
               ))}
@@ -515,7 +606,9 @@ export function App() {
         <button className="report-toast" onClick={openReports}>
           {(() => {
             const mail = formatReport(locale, toast, g.address);
-            return (
+            return phone ? (
+              <><b>{mail.badge}</b> ({toast.x},{toast.y})</>
+            ) : (
               <>
                 <b>{mail.toast}</b> {mail.badge} · {mail.stance} · {mail.title}
                 {mail.loot ? ` · ${mail.loot}` : ""}
@@ -526,7 +619,7 @@ export function App() {
         </button>
       ) : null}
 
-      {modal !== "none" ? (
+      {modal !== "none" && !(phone && boardModal) ? (
         <div className="modal-back" onClick={() => setModal("none")}>
           <div className={`modal${boardModal ? " board" : ""}${modal === "atlas" ? " atlas-modal" : ""}`} onClick={(e) => e.stopPropagation()}>
             <button className="btn tiny modal-x" onClick={() => setModal("none")}>{t("close")}</button>
@@ -1016,43 +1109,38 @@ export function App() {
 
       <section className="view-sheet">
         <div className="dock-head">
-          <b>视野</b>
-          <button type="button" className="btn tiny dock-close" onClick={closeDrawers}>收起</button>
+          <b>{g.chart.cx},{g.chart.cy}</b>
+          <button type="button" className="btn tiny dock-close" onClick={closeDrawers}>收</button>
         </div>
         <div className="view-cam">
           <button type="button" className="btn tiny" onClick={() => sendCam("out")}>－</button>
           <button type="button" className="btn tiny" onClick={() => sendCam("in")}>＋</button>
-          <button type="button" className="btn tiny" onClick={() => sendCam("rotate")}>转视角</button>
-          <button type="button" className="btn tiny" onClick={() => sendCam("reset")}>回正</button>
-        </div>
-        {!inside ? (
-          <div className="view-cam">
-            <button type="button" className="btn tiny" onClick={() => sendCam("terrain")}>地形</button>
-            <button type="button" className="btn tiny" onClick={() => sendCam("claims")}>连通图</button>
-            <button type="button" className="btn tiny" onClick={() => sendCam("realm")}>城域</button>
-          </div>
-        ) : null}
-        <div className="view-cam">
-          <span className="muted">{chartName(g.chart.cx, g.chart.cy)}</span>
+          <button type="button" className="btn tiny" onClick={() => sendCam("rotate")}>转</button>
+          <button type="button" className="btn tiny" onClick={() => sendCam("reset")}>正</button>
+          {!inside ? (
+            <>
+              <button type="button" className="btn tiny" onClick={() => sendCam("terrain")}>地</button>
+              <button type="button" className="btn tiny" onClick={() => sendCam("claims")}>通</button>
+              <button type="button" className="btn tiny" onClick={() => sendCam("realm")}>域</button>
+            </>
+          ) : null}
           <button type="button" className="btn tiny" onClick={() => g.goChart(0, -1)}>北</button>
           <button type="button" className="btn tiny" onClick={() => g.goChart(0, 1)}>南</button>
           <button type="button" className="btn tiny" onClick={() => g.goChart(-1, 0)}>西</button>
           <button type="button" className="btn tiny" onClick={() => g.goChart(1, 0)}>东</button>
-        </div>
-        <div className="view-cam">
           {(g.myCities[0] || rosterCities[0]) && !inside ? (
-            <button type="button" className="btn tiny" onClick={() => jumpCity((g.myCities[0] || rosterCities[0]).id)}>一键回城</button>
+            <button type="button" className="btn tiny" onClick={() => jumpCity((g.myCities[0] || rosterCities[0]).id)}>回城</button>
           ) : null}
-          {mine && !inside ? <button type="button" className="btn tiny" onClick={() => { setInside(true); setModal("none"); closeDrawers(); }}>进入城市</button> : null}
-          {inside ? <button type="button" className="btn tiny" onClick={() => setInside(false)}>回到大地图</button> : null}
+          {mine && !inside ? <button type="button" className="btn tiny" onClick={() => { setInside(true); setModal("none"); setLayer("play"); closeDrawers(); }}>进城</button> : null}
+          {inside ? <button type="button" className="btn tiny" onClick={() => setInside(false)}>出城</button> : null}
         </div>
       </section>
 
       <footer className="dock">
         <div>
           <div className="dock-head">
-            <b>联网指令</b>
-            <button type="button" className="btn tiny dock-close" onClick={closeDrawers}>收起</button>
+            <b>指令</b>
+            <button type="button" className="btn tiny dock-close" onClick={closeDrawers}>收</button>
           </div>
           <div className="muted dock-hint">联网指令：排队中 → 已上传 → 链上可查到才发送完毕。别人的地块不加载细目。进攻须清空路径上的聚落。</div>
           <div className="queue">
@@ -1071,16 +1159,22 @@ export function App() {
           </div>
         </div>
         <button className="btn primary" style={{ minWidth: 160 }} onClick={g.execute} disabled={!g.pending.length || Boolean(g.busy)}>
-          执行指令
+          {phone ? "执行" : "执行指令"}
         </button>
       </footer>
 
       <nav className="drawer-tabs drawer-tabs-bottom" role="tablist">
-        <button type="button" className={drawer === "view" ? "on" : ""} onClick={() => toggleDrawer("view")}>地图</button>
+        <button
+          type="button"
+          className={layer !== "play" ? "on" : drawer === "view" ? "on" : ""}
+          onClick={() => { if (layer !== "play") backToMap(); else toggleDrawer("view"); }}
+        >
+          {layer !== "play" ? "回" : "地图"}
+        </button>
         <button type="button" className={drawer === "queue" ? "on" : ""} onClick={() => toggleDrawer("queue")}>
           指令{g.pending.length ? ` ${g.pending.length}` : ""}
         </button>
-        <button type="button" className="drawer-fold" onClick={closeDrawers} disabled={drawer === "none"}>收起</button>
+        <button type="button" className="drawer-fold" onClick={closeDrawers} disabled={drawer === "none"}>收</button>
       </nav>
     </div>
   );

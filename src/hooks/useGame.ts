@@ -77,12 +77,10 @@ export function useGame() {
   }, []);
 
   useEffect(() => {
-    if (!address) return;
-    setWorldReady(false);
     void load(false);
     const t = setInterval(() => { void load(true); }, 15000);
     return () => clearInterval(t);
-  }, [load, address]);
+  }, [load]);
 
   const foldInput = useMemo(() => {
     if (!pending.length || !address) return batches;
