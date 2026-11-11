@@ -246,14 +246,13 @@ export function WorldCanvas(props: {
         const ly = Math.floor(c.y - origin.y);
         const t = terrainAt(c.x, c.y);
         const elev = t === "sea" ? 0 : (grid[ly]?.[lx] ?? 0);
-        const q = project(lx, ly, elev + 0.85, ox, oy, zoom, yaw, CHART, CHART);
-        drawCityMark(ctx, q.x, q.y, zoom, c);
+        const q = project(lx, ly, elev, ox, oy, zoom, yaw, CHART, CHART);
+        drawCityMark(ctx, q.x, q.y, zoom, c, yaw);
         const lv = displayLevel(c);
         const peak = c.peakLevel || lv;
-        drawLvTag(ctx, q.x, q.y - 10 * zoom, zoom, lv, peak);
+        drawLvTag(ctx, q.x, q.y - 16 * zoom, zoom, lv, peak);
         if (c.owner === address) {
-          const f = project(lx, ly, elev + 1.6, ox, oy, zoom, yaw, CHART, CHART);
-          ctx.drawImage(overlaySprite("flag"), f.x + 4 * zoom, f.y - 8 * zoom, 8 * zoom, 8 * zoom);
+          ctx.drawImage(overlaySprite("flag"), q.x + 6 * zoom, q.y - 22 * zoom, 8 * zoom, 8 * zoom);
         }
       }
 
@@ -269,7 +268,7 @@ export function WorldCanvas(props: {
         const t = terrainAt(Math.floor(pos.x), Math.floor(pos.y));
         const elev = t === "sea" ? 0 : (grid[Math.floor(ly)]?.[Math.floor(lx)] || 0);
         const q = project(lx, ly, elev, ox, oy, zoom, yaw, CHART, CHART);
-        ctx.drawImage(overlaySprite("army", walk), q.x - 8 * zoom, q.y - 6 * zoom - walk, TILE * zoom * 0.7, TILE * zoom * 0.7);
+        ctx.drawImage(overlaySprite("army", walk), q.x - 8 * zoom, q.y + 2 * zoom - walk * 0.2, TILE * zoom * 0.7, TILE * zoom * 0.7);
       }
 
       if (selected && selected.x >= origin.x && selected.y >= origin.y && selected.x < origin.x + CHART && selected.y < origin.y + CHART) {

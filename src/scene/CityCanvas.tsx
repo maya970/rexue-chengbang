@@ -85,7 +85,7 @@ export function CityCanvas(props: {
         const ly = 4;
         const elev = grid[ly]?.[Math.floor(lx)] || 1;
         const p = project(lx, ly, elev, ox, oy, zoom, yaw, CITY_W, CITY_H);
-        return { card, x: p.x - 8 * zoom, y: p.y - 4 * zoom, flip, frame, order: depthOf(lx, ly, yaw, CITY_W, CITY_H) };
+        return { card, x: p.x - 8 * zoom, y: p.y + 4 * zoom, flip, frame, order: depthOf(lx, ly, yaw, CITY_W, CITY_H) };
       });
     }
 
@@ -140,8 +140,8 @@ export function CityCanvas(props: {
           textureIsoTop(ctx, p.x, p.y, zoom, ground);
         }
         if (plot?.building) {
-          const q = project(lx, ly, water ? 0.4 : elev + 1.2, ox, oy, zoom, yaw, CITY_W, CITY_H);
-          drawBuildingMark(ctx, q.x, q.y, zoom, plot.building, city.buildings[plot.building]?.level || 1);
+          const q = project(lx, ly, water ? 0 : elev, ox, oy, zoom, yaw, CITY_W, CITY_H);
+          drawBuildingMark(ctx, q.x, q.y, zoom, plot.building, city.buildings[plot.building]?.level || 1, yaw);
         }
       }
       for (const w of walkers(now).sort((a, b) => a.order - b.order)) {

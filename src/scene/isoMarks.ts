@@ -1,6 +1,7 @@
 import type { BuildingId, City, HamletKind } from "../types";
 import { displayLevel, hamletOf } from "../engine/hamlets";
 import { drawIsoHouse, TH } from "./iso";
+import { buildingSprite, plantSprite, settleSprite } from "./artSprites";
 
 export const HOUSE_PAL: Record<BuildingId, { top: string; left: string; right: string }> = {
   acropolis: { top: "#c83828", left: "#6a1818", right: "#8a2828" },
@@ -28,26 +29,54 @@ export function hamletPal(kind: HamletKind) {
   return CASTLE_PAL;
 }
 
-export function drawCityMark(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, city: City) {
-  if (city.npc && !(city.owner || "").includes("polis") && !(city.systemRank)) {
-    drawBarbarianMark(ctx, x, y, scale);
-    return;
-  }
-  const kind = hamletOf(city);
-  const stories = kind === "city" ? 1.35 : kind === "urban" ? 1.15 : kind === "suburb" ? 0.95 : 0.75;
-  drawIsoHouse(ctx, x, y, scale * 0.72, hamletPal(kind), stories);
-  if (kind === "city") {
-    drawIsoHouse(ctx, x, y - TH * scale * 0.22, scale * 0.42, CASTLE_PAL, 0.7);
-  }
+function markKind(city: City): HamletKind | "barbarian" | "system" {
+  if (city.systemRank) return "system";
+  if (city.npc && !(city.owner || "").includes("polis")) return "barbarian";
+  return hamletOf(city);
 }
 
-export function drawBuildingMark(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, id: BuildingId, level = 1) {
+export function drawCityMark(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, city: City, yaw = 0) {
+  const kind = markKind(city);
+  const spr = settleSprite(kind);
+  if (spr) {
+    const width = kind === "village" ? 0.82 : kind === "city" || kind === "system" ? 1.12 : 0.96;
+    plantSprite(ctx, spr, x, y, scale, { width, flip: (yaw & 1) === 1, foot: 0.62 });
+    return;
+  }
+  if (kind === "barbarian") {
+    drawBarbarianMark(ctx, x, y + TH * scale * 0.5, scale);
+    return;
+  }
+  const stories = kind === "city" ? 1.35 : kind === "urban" ? 1.15 : kind === "suburb" ? 0.95 : 0.75;
+  drawIsoHouse(ctx, x, y + TH * scale * 0.15, scale * 0.72, hamletPal(hamletOf(city)), stories);
+}
+
+export function drawBuildingMark(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  scale: number,
+  id: BuildingId,
+  level = 1,
+  yaw = 0,
+) {
+  const spr = buildingSprite(id);
+  if (spr) {
+    const width = 0.92 + Math.min(0.28, level * 0.04);
+    plantSprite(ctx, spr, x, y, scale, { width, flip: (yaw & 1) === 1, foot: 0.6 });
+    return;
+  }
   const pal = HOUSE_PAL[id] || CITY_PAL;
   const stories = 0.85 + Math.min(1.4, level * 0.18);
-  drawIsoHouse(ctx, x, y, scale, pal, stories);
+  drawIsoHouse(ctx, x, y + TH * scale * 0.12, scale, pal, stories);
 }
 
 export function drawBarbarianMark(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number) {
+  const spr = settleSprite("barbarian");
+  if (spr) {
+    plantSprite(ctx, spr, x, y, scale, { width: 0.9, foot: 0.62 });
+    return;
+  }
   const s = scale;
   drawIsoHouse(ctx, x, y, s * 0.55, { top: "#8a6a48", left: "#4a3020", right: "#6a4830" }, 1.05);
   ctx.save();
@@ -61,9 +90,6 @@ export function drawBarbarianMark(ctx: CanvasRenderingContext2D, x: number, y: n
   ctx.beginPath();
   ctx.ellipse(x + 5.4 * s, y - 12.2 * s, 4.2 * s, 3.1 * s, 0.35, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = "#3a2418";
-  ctx.lineWidth = Math.max(1, 0.6 * s);
-  ctx.stroke();
   ctx.restore();
 }
 
